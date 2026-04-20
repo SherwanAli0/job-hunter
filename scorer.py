@@ -40,7 +40,9 @@ Rules:
 - All German cities are acceptable (Berlin, Munich, Hamburg, Frankfurt, Stuttgart, Cologne, etc.) — do NOT penalise any German location
 - Slight boost for NRW (Düsseldorf, Cologne, Dortmund, Essen, Bochum) and remote/hybrid since candidate is based in Bochum
 - Boost fully remote and hybrid roles — candidate can work anywhere in Germany
-- Boost roles with Python, ML, data science, AI, LLM, NLP keywords
+- Boost roles with Python, ML, data science, AI, LLM, NLP, agent, RAG, LangChain, GenAI keywords
+- BOOST (+10) roles involving LLM engineering, AI agents, prompt engineering, or GenAI — candidate has hands-on experience building these at iseremo GmbH
+- Candidate also knows React, Node.js, JavaScript — slight boost for full-stack AI or ML engineer roles that need frontend/backend skills
 - Penalise roles in non-German-speaking countries (unless fully remote)
 - LANGUAGE — this is the most important scoring factor:
   * BOOST (+15) roles that explicitly say "English-speaking team", "working language is English", "English is a must", or the job posting is written in English

@@ -6,14 +6,14 @@
 CV_PROFILE = """
 Name: Sherwan Ali
 Location: Bochum, Germany | Full work authorisation (valid residence permit)
-Availability: Internship or full-time from July 2026 (NOT eligible for Werkstudent — not enrolled at German university)
-Note: Open to internships, entry-level, junior, and mid-level roles. Full-time preferred from July 2026.
-Target roles: Werkstudent Data Science/ML/AI, Junior Data Scientist, Junior ML Engineer, Data Analyst
+Availability: Currently interning at iseremo GmbH (Apr 2026–present). Open to internships now and full-time from July 2026.
+NOT eligible for Werkstudent — not enrolled at a German university.
+Target roles: Junior AI Engineer, Junior ML Engineer, Junior Data Scientist, LLM Engineer, Data Analyst, AI Internship
 
 LANGUAGE REQUIREMENT (critical for scoring):
 - English: C1 — STRONGLY prefer English-speaking roles or teams
 - German: B1 — can work in German-light environments but NOT suited for roles requiring fluent/advanced German
-- Please PENALISE roles that explicitly require C1/C2 German or "verhandlungssicheres Deutsch"
+- PENALISE roles requiring C1/C2 German or "verhandlungssicheres Deutsch"
 - Turkish: C1, Arabic: Native, Kurdish: Native
 
 Education:
@@ -22,27 +22,40 @@ Education:
 - Coursework: Machine Learning, Deep Learning, Database Systems, Statistics, Data Mining, Linear Algebra, Computer Vision
 
 Technical Skills:
-- Programming: Python (advanced), SQL, Excel
-- ML/AI: Classification, Regression, Clustering, Neural Networks, CNNs, Imbalanced Learning, XGBoost
-- Libraries: Pandas, NumPy, scikit-learn, TensorFlow, Keras, PyTorch, Matplotlib, imbalanced-learn
-- GenAI/NLP: LLMs, RAG, LangChain, Prompt Engineering
-- Tools: Git, GitHub, Docker, VS Code, Jupyter Notebooks
+- Programming: Python (advanced), SQL, JavaScript, Excel
+- AI & LLMs: LLMs, RAG, LangChain, Prompt Engineering, Agent Workflows, LLM Evaluation, Fine-tuning
+- ML: Classification, Regression, Neural Networks, CNNs, Transformers, Hyperparameter Tuning, Imbalanced Learning
+- Libraries & Frameworks: PyTorch, TensorFlow, Keras, scikit-learn, XGBoost, Pandas, NumPy, React, Node.js
+- Infrastructure & Tools: Git, GitHub Actions, Docker, REST APIs, Web Scraping, VS Code, Jupyter Notebooks
 
 Work Experience:
 - Software & AI Intern, iseremo GmbH, Düsseldorf (Apr 2026 – Present):
-  AI chatbot development, database work, software testing, web development debugging
+  Building LLM-powered chatbot and AI agent systems end-to-end; owns prompting strategies, tool integrations,
+  and agent workflows. Designs evaluation and testing frameworks for AI systems. Works full-stack: databases,
+  backend logic, web development.
 - IT Support & Website Management Intern, Salam Institute for Peace and Justice (Dec 2024 – Aug 2025, Remote):
-  WordPress migration, vendor evaluation framework, translating business requirements to technical specs
+  Led WordPress migration, built vendor evaluation framework covering 15+ firms, translated business
+  requirements into technical specifications, trained non-technical staff.
 
 Key Projects:
-- ML Reproducibility Study: Replicated CSRBoost across 15 datasets × 10 algorithms, 75k configurations,
-  900+ GPU hours, 143/143 combinations matched within 3% error — graduation project
-- Diabetes Risk Prediction: Full ML pipeline with SMOTE balancing, SVM/KNN comparison, 75.32% accuracy
+- Job Hunter — Daily AI-Powered Job Digest (Python, GitHub Actions, Anthropic API, Greenhouse/Lever APIs):
+  Built and shipped end-to-end automated job matching system. Scrapes 15+ company career pages, scores
+  listings 0-100 against a CV using Claude, delivers ranked digest to email every morning via GitHub Actions.
+  Fully automated, zero manual input. Public repo: github.com/SherwanAli0/job-hunter
+- German Language Learning App (React, Vite, Tailwind CSS, Node.js, Anthropic API):
+  Full-stack AI language learning app from scratch. Prompt engineering for contextual exercises, adaptive
+  feedback, and dynamic difficulty. github.com/SherwanAli0/German-App
+- ML Reproducibility Study — Graduation Project (Python, scikit-learn, PyTorch, imbalanced-learn):
+  Verified 143 reported results across 15 datasets and 10 algorithms. ~75,000 configurations over 900+
+  compute-hours. 143/143 replications within 3% average error. github.com/SherwanAli0/csrboost-replication
+- Diabetes Risk Prediction (scikit-learn, imbalanced-learn, Pandas):
+  Full ML pipeline with SMOTE balancing, SVM/KNN comparison. 75.32% accuracy, 81.8% post-SMOTE recall.
 
 Certifications:
-- IBM AI Engineering Professional Certificate (13 courses: ML, Deep Learning, CV, Transformers, LLM fine-tuning, RAG)
-- Google Advanced Data Analytics Professional Certificate
-- Databases and SQL for Data Science with Python (IBM/Coursera)
+- IBM AI Engineering Professional Certificate (Sep 2025) — 13 courses: ML, Deep Learning, CV, Transformers,
+  LLM fine-tuning, RAG, LangChain
+- Google Advanced Data Analytics Professional Certificate (Mar 2026) — statistics, regression, ML, Tableau
+- Databases and SQL for Data Science with Python — IBM/Coursera (Apr 2026)
 """
 
 # ── Search queries sent to job boards ─────────────────────────────────────────
@@ -53,14 +66,24 @@ SEARCH_QUERIES = [
     "Junior Data Analyst Germany English",
     "Junior AI Engineer Germany English",
     "Junior NLP Engineer Germany English",
+    "Junior LLM Engineer Germany English",
     "Entry Level Data Scientist Germany English",
     "Entry Level Machine Learning Germany English",
+    "Entry Level AI Engineer Germany English",
     "Graduate Data Scientist Germany English",
     "Associate Data Scientist Germany English",
+    # LLM / GenAI / Agent roles (new — matches iseremo experience)
+    "LLM Engineer Germany English",
+    "GenAI Engineer Germany English",
+    "AI Agent Engineer Germany English",
+    "Prompt Engineer Germany English",
+    "Junior LLM Developer Germany English",
+    "AI Engineer LLM Germany English",
     # Internships (no student visa required)
     "Data Science Internship Germany English",
     "Machine Learning Internship Germany English",
     "AI Internship Germany English",
+    "LLM Internship Germany English",
     "Data Analyst Internship Germany English",
     "Praktikum Data Science English",
     # Mid level (open to strong junior candidates)
@@ -71,8 +94,8 @@ SEARCH_QUERIES = [
     # Remote specific
     "Remote Data Scientist Germany English",
     "Remote Machine Learning Engineer Germany English",
-    "Remote Data Analyst Germany English",
     "Remote AI Engineer Germany English",
+    "Remote LLM Engineer Germany English",
     "Remote Junior Data Scientist English",
     "Remote Data Science Internship English",
 ]
