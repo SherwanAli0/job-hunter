@@ -22,12 +22,30 @@ BATCH_SIZE = 10
 # ── Hard disqualifiers — checked BEFORE any Claude API call ───────────────────
 # These patterns catch clear mismatches and set score=0 without spending tokens.
 
-_RE_EXP = re.compile(
+# Numeric year patterns (3, 4, … years)
+_RE_EXP_NUM = re.compile(
     r"\b([3-9]|\d{2})\+?\s*years?\s*(of\s*)?(professional\s*)?(work\s*)?experience"
     r"|\bminimum\s*(of\s*)?([3-9]|\d{2})\s*years?"
     r"|\bat\s+least\s+([3-9]|\d{2})\s*years?"
     r"|\b([3-9]|\d{2})\s*[-–]\s*\d+\s*years?\s*(of\s*)?experience"
     r"|\b([3-9]|\d{2})\+\s*years?",
+    re.IGNORECASE,
+)
+
+# Written-out year patterns ("three years", "minimum three (3) years", etc.)
+_RE_EXP_TEXT = re.compile(
+    r"\b(three|four|five|six|seven|eight|nine|ten)\s*(or\s+more\s+)?"
+    r"years?\s*(of\s*)?(professional\s*)?(work\s*)?experience"
+    r"|\bminimum\s+(three|four|five|six|seven|eight|nine|ten)"
+    r"(\s*\(\s*\d+\s*\))?\s*years?"
+    r"|\bsenior.?level\s+experience\s+required",
+    re.IGNORECASE,
+)
+
+# Senior / Lead title — catches any slip-throughs from main.py filter
+_RE_SENIOR_TITLE = re.compile(
+    r"\b(senior|lead|head\s+of|principal|staff\s+engineer|"
+    r"director|vp\b|vice\s+president)\b",
     re.IGNORECASE,
 )
 
@@ -99,13 +117,34 @@ _RE_ML_SIGNALS = re.compile(
     re.IGNORECASE,
 )
 
-# Non-Germany locations (in-person signals — remote overrides this)
+# Non-Germany locations
 _RE_NONGER_LOC = re.compile(
     r"\b("
     r"london|manchester|birmingham|paris|milan|rome|madrid|barcelona|"
     r"amsterdam|new\s+york|san\s+francisco|seattle|boston|chicago|"
     r"toronto|sydney|melbourne|dubai|singapore|hong\s+kong|"
     r"united\s+states\b|united\s+kingdom\b"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# Germany presence signals — any of these confirms Germany eligibility
+_GERMANY_TERMS = (
+    "germany", "deutschland", "berlin", "munich", "münchen",
+    "hamburg", "frankfurt", "cologne", "köln", "düsseldorf",
+    "bochum", "dortmund", "essen", "nrw", "dach",
+    "german market", "german office", "german team",
+    "european union", "europe-based", "eu-based",  # broad but covers Germany
+)
+
+# Unpaid / equity-only compensation
+_RE_UNPAID = re.compile(
+    r"\b("
+    r"unpaid\s+(internship|position|role|placement)|"
+    r"equity[\s-]only|no\s+salary|without\s+(pay|compensation|remuneration)|"
+    r"volunteer\s+(position|role|opportunity|basis)|"
+    r"keine\s+(vergütung|bezahlung)|ehrenamtlich(e|er|es)?\b|"
+    r"stipend\s+only|honorarium\s+only"
     r")\b",
     re.IGNORECASE,
 )
@@ -117,44 +156,74 @@ def _hard_disqualify(j: dict) -> tuple[bool, str]:
     Returns (True, reason) → score=0, skip Claude.
     Returns (False, "")   → proceed to Claude scoring.
     """
-    title   = (j.get("title")       or "")
-    desc    = (j.get("description") or "")
-    loc     = (j.get("location")    or "")
-    t_low   = title.lower()
-    d_low   = desc.lower()
+    title    = (j.get("title")       or "")
+    desc     = (j.get("description") or "")
+    loc      = (j.get("location")    or "")
+    t_low    = title.lower()
+    d_low    = desc.lower()
     combined = f"{t_low} {d_low}"
 
-    # 1. Experience requirement ≥ 3 years
-    if _RE_EXP.search(d_low):
+    # ── Check 1: Experience requirement ───────────────────────────────────────
+    # 1a. Numeric patterns: "3+ years", "minimum 4 years", "3-5 years experience"
+    if _RE_EXP_NUM.search(d_low):
         return True, "Requires 3+ years experience"
+    # 1b. Written-out patterns: "three years", "minimum three (3) years"
+    if _RE_EXP_TEXT.search(d_low):
+        return True, "Requires 3+ years experience (written out)"
+    # 1c. Title-level seniority: Senior / Lead / Head / Principal in title
+    #     with no junior/entry/intern qualifier → auto-disqualify
+    if _RE_SENIOR_TITLE.search(title):
+        junior_qualifiers = ("junior", "entry", "intern", "graduate", "associate", "jr.")
+        if not any(q in t_low for q in junior_qualifiers):
+            return True, f"Senior/Lead title with no junior qualifier"
 
-    # 2. Non-Python primary language
+    # ── Check 2: Non-Python primary language ──────────────────────────────────
     if _RE_NONPY_TITLE.search(title) and "python" not in combined:
         return True, "Primary language is not Python (no Python mentioned)"
     for signal in _NONPY_DESC_SIGNALS:
         if signal in combined and "python" not in combined:
             return True, f"Primary language appears non-Python ({signal})"
 
-    # 3. Wrong domain
+    # ── Check 3: Wrong domain ─────────────────────────────────────────────────
     if _RE_BAD_DOMAIN.search(combined):
         return True, "Wrong domain (embedded / hardware / biomedical / pharma)"
 
-    # 4. Location clearly outside Germany with no remote signal
-    loc_low = loc.lower()
-    if _RE_NONGER_LOC.search(loc_low):
-        if "remote" not in loc_low and "remote" not in d_low[:600]:
-            return True, "Location is not Germany-commutable and not remote"
+    # ── Check 4: Location — Germany-remote logic ──────────────────────────────
+    loc_low       = loc.lower()
+    desc_1000     = d_low[:1000]
+    has_remote    = "remote" in loc_low or "remote" in desc_1000
+    has_nonger    = bool(_RE_NONGER_LOC.search(loc_low))
+    germany_confirmed = (
+        any(t in loc_low   for t in _GERMANY_TERMS) or
+        any(t in desc_1000 for t in _GERMANY_TERMS)
+    )
 
-    # 5. Freelance / contractor only
+    if has_nonger and not has_remote:
+        # Specific non-Germany city, no remote option at all
+        return True, "Location is not Germany-commutable and not remote"
+
+    if has_nonger and has_remote and not germany_confirmed:
+        # Non-Germany city + remote, but Germany never mentioned → country-restricted remote
+        return True, "Remote based outside Germany — Germany not confirmed as eligible location"
+
+    if has_remote and not has_nonger and not germany_confirmed:
+        # Plain "remote" with zero Germany context in first 1000 chars → uncertain
+        return True, "Remote role — Germany not confirmed as eligible location"
+
+    # ── Check 5: Freelance / contractor only ──────────────────────────────────
     if _RE_FREELANCE_TITLE.search(title):
         return True, "Freelance role — seeking permanent/fixed-term employment"
     if _RE_FREELANCE_DESC.search(d_low):
         return True, "Contractor/freelance only — not permanent employment"
 
-    # 6. Web analytics primary focus without any ML/AI component
+    # ── Check 6: Web analytics primary focus without ML/AI ───────────────────
     if _RE_WEB_ANALYTICS.search(combined):
         if not _RE_ML_SIGNALS.search(combined) and "python" not in combined:
             return True, "Primary focus is web analytics (GA4/tag management), not ML/AI"
+
+    # ── Check 7: Unpaid / equity-only ────────────────────────────────────────
+    if _RE_UNPAID.search(d_low):
+        return True, "Unpaid or equity-only role — not paid employment"
 
     return False, ""
 
@@ -170,8 +239,10 @@ Scoring guide:
 CANDIDATE PROFILE:
 {CV_PROFILE}
 
-TARGET ROLES — if a role does not map to one of these, cap score at 45:
+TARGET ROLES:
   Junior ML Engineer | AI Engineer | Data Scientist | Applied AI | LLM / Agent Systems Engineer
+  If a role does not map to one of these, the BASE score is capped at 45 — but all hard penalties
+  below still apply on top of that cap and can reduce the score further below 45.
 
 HARD PENALTIES — apply these first, they override everything else:
 - PENALISE (-40) roles requiring 3+ years professional experience — candidate has under 1 year
