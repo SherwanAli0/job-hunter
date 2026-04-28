@@ -33,6 +33,67 @@ _GERMAN_TITLE_FRAGMENTS = (
     "abschluss", "statistik",
 )
 
+# ── Location filter — Germany or EU/EEA only (tax-eligible) ──────────────────
+
+_GERMANY_TERMS = (
+    "germany", "deutschland", "berlin", "munich", "münchen", "hamburg",
+    "frankfurt", "cologne", "köln", "düsseldorf", "bochum", "dortmund",
+    "essen", "stuttgart", "nrw", "bavaria", "saxony", "hessen",
+)
+
+_EU_EEA_TERMS = (
+    # EU member states
+    "austria", "belgium", "bulgaria", "croatia", "cyprus", "czech",
+    "denmark", "estonia", "finland", "france", "greece", "hungary",
+    "ireland", "italy", "latvia", "lithuania", "luxembourg", "malta",
+    "netherlands", "poland", "portugal", "romania", "slovakia",
+    "slovenia", "spain", "sweden",
+    # EEA + Switzerland
+    "norway", "iceland", "liechtenstein", "switzerland",
+    # Major EU cities (catch location strings like "Amsterdam" without country)
+    "amsterdam", "paris", "vienna", "brussels", "copenhagen",
+    "stockholm", "oslo", "helsinki", "warsaw", "prague", "budapest",
+    "lisbon", "dublin", "zurich", "zürich", "barcelona", "madrid",
+    "milan", "rome",
+    # Broad terms
+    "european union", "europe", "eu-based", "eu ", "eea", "dach",
+    "emea",
+)
+
+
+def _is_germany_or_eu(j: dict) -> bool:
+    """
+    Keep jobs that are based in Germany or EU/EEA (tax-eligible for Sherwan).
+    Drop: Latin America, Asia, Africa, Middle East, USA, Canada, Australia, etc.
+    """
+    loc  = (j.get("location")    or "").lower()
+    desc = (j.get("description") or "").lower()[:1000]
+
+    # No location → let through (Claude will score it)
+    if not loc:
+        return True
+
+    # Germany in location → always keep
+    if any(t in loc for t in _GERMANY_TERMS):
+        return True
+
+    # EU/EEA country in location → keep
+    if any(t in loc for t in _EU_EEA_TERMS):
+        return True
+
+    # "remote" in location → only keep if Germany or EU mentioned in first 1000 chars
+    if "remote" in loc:
+        if any(t in loc for t in _GERMANY_TERMS) or any(t in loc for t in _EU_EEA_TERMS):
+            return True
+        if any(t in desc for t in _GERMANY_TERMS) or any(t in desc for t in _EU_EEA_TERMS):
+            return True
+        # "remote" with zero Germany/EU context → drop (this catches Brazil/Colombia/US remote)
+        return False
+
+    # Location is something else entirely (Brazil, Colombia, India, USA...) → drop
+    return False
+
+
 def _no_experience_overload(j: dict) -> bool:
     """Drop jobs that require 3+ years of experience anywhere in the description."""
     import re
@@ -149,6 +210,10 @@ def main() -> None:
 
     new_jobs = [j for j in all_jobs if j["id"] not in seen]
     print(f"New (unseen) jobs: {len(new_jobs)}")
+
+    # Germany or EU/EEA only (tax-eligible) — drops Brazil, Colombia, US, etc.
+    new_jobs = [j for j in new_jobs if _is_germany_or_eu(j)]
+    print(f"After location filter (Germany/EU): {len(new_jobs)}")
 
     # Drop jobs that are clearly German-language with no English mention
     new_jobs = [j for j in new_jobs if _is_english_friendly(j)]

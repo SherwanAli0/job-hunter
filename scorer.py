@@ -117,24 +117,59 @@ _RE_ML_SIGNALS = re.compile(
     re.IGNORECASE,
 )
 
-# Non-Germany locations
+# Non-Germany / Non-EU locations — pre-screener blocklist
 _RE_NONGER_LOC = re.compile(
     r"\b("
-    r"london|manchester|birmingham|paris|milan|rome|madrid|barcelona|"
-    r"amsterdam|new\s+york|san\s+francisco|seattle|boston|chicago|"
-    r"toronto|sydney|melbourne|dubai|singapore|hong\s+kong|"
-    r"united\s+states\b|united\s+kingdom\b"
+    # UK
+    r"london|manchester|birmingham|united\s+kingdom\b|"
+    # USA
+    r"new\s+york|san\s+francisco|seattle|boston|chicago|los\s+angeles|"
+    r"austin|denver|atlanta|washington\s+d\.?c\.?|united\s+states\b|\busa\b|"
+    # Canada
+    r"toronto|vancouver|montreal|canada\b|"
+    # Australia / NZ
+    r"sydney|melbourne|brisbane|australia\b|new\s+zealand\b|"
+    # Latin America
+    r"brazil|brasil|colombia|mexico|méxico|argentina|chile|peru|"
+    r"bogot[aá]|são\s+paulo|rio\s+de\s+janeiro|buenos\s+aires|"
+    r"medell[ií]n|santiago|lima|latin\s+america|latam\b|"
+    # Middle East (non-EU)
+    r"dubai|abu\s+dhabi|saudi\s+arabia|qatar|bahrain|kuwait|oman|"
+    r"united\s+arab\s+emirates\b|\buae\b|"
+    # Asia
+    r"singapore|hong\s+kong|tokyo|bangalore|bengaluru|hyderabad|"
+    r"mumbai|delhi|chennai|pune|india\b|china\b|japan\b|"
+    r"south\s+korea\b|taiwan\b|philippines\b|vietnam\b|thailand\b|indonesia\b|"
+    r"malaysia\b|pakistan\b|"
+    # Africa
+    r"nigeria\b|kenya\b|south\s+africa\b|egypt\b|nairobi|lagos|cape\s+town|"
+    r"johannesburg"
     r")\b",
     re.IGNORECASE,
 )
 
-# Germany presence signals — any of these confirms Germany eligibility
+# Germany / EU / EEA presence signals — any of these confirms tax-eligible location
 _GERMANY_TERMS = (
+    # Germany
     "germany", "deutschland", "berlin", "munich", "münchen",
     "hamburg", "frankfurt", "cologne", "köln", "düsseldorf",
-    "bochum", "dortmund", "essen", "nrw", "dach",
+    "bochum", "dortmund", "essen", "stuttgart", "nrw", "bavaria",
+    "saxony", "hessen", "dach",
     "german market", "german office", "german team",
-    "european union", "europe-based", "eu-based",  # broad but covers Germany
+    # EU / EEA countries
+    "austria", "belgium", "bulgaria", "croatia", "cyprus", "czech",
+    "denmark", "estonia", "finland", "france", "greece", "hungary",
+    "ireland", "italy", "latvia", "lithuania", "luxembourg", "malta",
+    "netherlands", "poland", "portugal", "romania", "slovakia",
+    "slovenia", "spain", "sweden",
+    "norway", "iceland", "liechtenstein", "switzerland",
+    # Major EU cities
+    "amsterdam", "paris", "vienna", "brussels", "copenhagen",
+    "stockholm", "oslo", "helsinki", "warsaw", "prague", "budapest",
+    "lisbon", "dublin", "zurich", "zürich", "barcelona", "madrid",
+    "milan", "rome",
+    # Broad terms
+    "european union", "europe", "eu-based", "eea", "emea",
 )
 
 # Unpaid / equity-only compensation
@@ -188,27 +223,27 @@ def _hard_disqualify(j: dict) -> tuple[bool, str]:
     if _RE_BAD_DOMAIN.search(combined):
         return True, "Wrong domain (embedded / hardware / biomedical / pharma)"
 
-    # ── Check 4: Location — Germany-remote logic ──────────────────────────────
+    # ── Check 4: Location — Germany / EU / EEA only (tax-eligible) ────────────
     loc_low       = loc.lower()
     desc_1000     = d_low[:1000]
     has_remote    = "remote" in loc_low or "remote" in desc_1000
-    has_nonger    = bool(_RE_NONGER_LOC.search(loc_low))
-    germany_confirmed = (
+    has_blocked   = bool(_RE_NONGER_LOC.search(loc_low))
+    eu_confirmed  = (
         any(t in loc_low   for t in _GERMANY_TERMS) or
         any(t in desc_1000 for t in _GERMANY_TERMS)
     )
 
-    if has_nonger and not has_remote:
-        # Specific non-Germany city, no remote option at all
-        return True, "Location is not Germany-commutable and not remote"
+    if has_blocked and not has_remote:
+        # Specific non-EU city/country, no remote option at all
+        return True, "Location outside Germany/EU and not remote"
 
-    if has_nonger and has_remote and not germany_confirmed:
-        # Non-Germany city + remote, but Germany never mentioned → country-restricted remote
-        return True, "Remote based outside Germany — Germany not confirmed as eligible location"
+    if has_blocked and has_remote and not eu_confirmed:
+        # Non-EU location + remote, but no Germany/EU mention → restricted remote
+        return True, "Remote based outside EU — Germany/EU not confirmed as eligible"
 
-    if has_remote and not has_nonger and not germany_confirmed:
-        # Plain "remote" with zero Germany context in first 1000 chars → uncertain
-        return True, "Remote role — Germany not confirmed as eligible location"
+    if has_remote and not has_blocked and not eu_confirmed:
+        # Plain "remote" with zero Germany/EU context in first 1000 chars
+        return True, "Remote role — Germany/EU not confirmed as eligible location"
 
     # ── Check 5: Freelance / contractor only ──────────────────────────────────
     if _RE_FREELANCE_TITLE.search(title):
