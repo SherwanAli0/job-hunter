@@ -1,0 +1,592 @@
+"""
+scorer.py — uses Claude to score each job against Sherwan's CV profile.
+
+Pipeline:
+  1. _hard_disqualify()  — regex pre-screen, sets score=0, skips Claude API call
+  2. _score_batch()      — Claude Haiku scores the remaining jobs in batches of 10
+"""
+
+import json
+import os
+import re
+import time
+
+import anthropic
+
+from config import CV_PROFILE
+
+client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+BATCH_SIZE = 10
+
+# ── Hard disqualifiers — checked BEFORE any Claude API call ───────────────────
+# These patterns catch clear mismatches and set score=0 without spending tokens.
+
+# Numeric year patterns (3, 4, … years)
+# Allows ANY 0-3 word qualifier between "of" and "experience" — catches
+# "industry experience", "hands-on experience", "relevant practical experience",
+# "applicable professional experience", etc.
+# Also catches: "with 3+ years", "demonstrated 3 years", "proven 3+ years",
+# "successful 5 years" — common phrasings in job descriptions.
+_RE_EXP_NUM = re.compile(
+    r"\b([3-9]|\d{2})\+?\s*years?\s+(?:of\s+)?(?:[\w-]+\s+){0,3}experience"
+    r"|\b([3-9]|\d{2})\+?\s*years?\s+experience"
+    r"|\bminimum\s*(of\s+)?([3-9]|\d{2})\s*\+?\s*years?"
+    r"|\bat\s+least\s+([3-9]|\d{2})\+?\s*years?"
+    r"|\b([3-9]|\d{2})\s*[-–]\s*\d+\s*years?\s+(?:of\s+)?(?:[\w-]+\s+){0,3}experience"
+    r"|\b([3-9]|\d{2})\+\s*years?"
+    r"|\bexperience\s*:?\s*([3-9]|\d{2})\+?\s*years?"
+    # NEW: "with [optional adjective] N+ years" — e.g.
+    #   "with 3+ years", "with proven 3 years", "with strong 5+ years"
+    r"|\bwith\s+(?:[\w-]+\s+){0,2}([3-9]|\d{2})\+?\s*years?"
+    # NEW: "demonstrated|proven|successful N+ years"
+    r"|\b(?:demonstrated|proven|successful|track\s+record\s+of)\s+(?:[\w-]+\s+){0,2}([3-9]|\d{2})\+?\s*years?",
+    re.IGNORECASE,
+)
+
+# Written-out year patterns ("three years", "minimum three (3) years", etc.)
+_RE_EXP_TEXT = re.compile(
+    r"\b(three|four|five|six|seven|eight|nine|ten)\s+(?:or\s+more\s+)?"
+    r"(?:\(\s*\d+\s*\)\s+)?years?\s+(?:of\s+)?(?:[\w-]+\s+){0,3}experience"
+    r"|\b(minimum|at\s+least)\s+(of\s+)?(three|four|five|six|seven|eight|nine|ten)"
+    r"(\s*\(\s*\d+\s*\))?\s+years?"
+    r"|\bsenior.?level\s+experience\s+required",
+    re.IGNORECASE,
+)
+
+# Master's-required signals — concise + verbose + contextual.
+# Used in concert with _RE_BACHELOR_OK below.
+_RE_MASTERS_REQ = re.compile(
+    r"(?:"
+    r"master(?:'s)?\s+degree\s+(?:is\s+)?required"
+    r"|must\s+have\s+a\s+master"
+    r"|requires\s+a\s+master"
+    r"|master(?:'s)?\s+degree\s+in\b"
+    r"|master\s+of\s+science\s+in\b"
+    r"|\bmsc\s+in\b"
+    r"|\bm\.sc\.?\s+in\b"
+    r"|masterabschluss\s+erforderlich"
+    r"|abgeschlossenes\s+masterstudium"
+    r")",
+    re.IGNORECASE,
+)
+_RE_MASTERS_CONTEXT = re.compile(
+    r"(minimum|required|essential)\s+qualifications?[\s\S]{0,300}?\bmaster"
+    r"|requirements?\s*:[\s\S]{0,300}?\bmaster\s+degree",
+    re.IGNORECASE,
+)
+_RE_BACHELOR_OK = re.compile(
+    r"\b(bachelor|b\.sc\b|\bbsc\b|undergraduate|or\s+equivalent|or\s+related\s+degree|ba/bs)\b",
+    re.IGNORECASE,
+)
+
+# Senior / Lead title — catches any slip-throughs from main.py filter
+_RE_SENIOR_TITLE = re.compile(
+    r"\b(senior|lead|head\s+of|principal|staff\s+engineer|"
+    r"director|vp\b|vice\s+president)\b",
+    re.IGNORECASE,
+)
+
+# Non-Python primary language signals in the JOB TITLE
+_RE_NONPY_TITLE = re.compile(
+    r"\b("
+    r"golang|go\s+(developer|engineer|backend|programmer)|"
+    r"rust\s+(developer|engineer|programmer)|"
+    r"java\s+(developer|engineer|backend|programmer)|"   # NOT javascript
+    r"c\+\+\s*(developer|engineer|programmer|specialist)|"
+    r"embedded\s+c\b|"
+    r"\.net\s+(developer|engineer|programmer)|"
+    r"scala\s+(developer|engineer)|"
+    r"kotlin\s+(developer|engineer)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# Non-Python keywords that appear anywhere (description), paired with absence of Python
+_NONPY_DESC_SIGNALS = ("golang", "typescript developer", "typescript engineer",
+                        "rust developer", "rust engineer")
+
+# Wrong domain — completely different field
+_RE_BAD_DOMAIN = re.compile(
+    r"\b("
+    r"embedded\s+systems?|tinyml|tiny\s*ml|fpga|microcontroller|"
+    r"firmware\s+(developer|engineer)|vhdl|verilog|"
+    r"hardware\s+(developer|engineer|design)|"
+    r"biomedical\s+(engineer|scientist)|medical\s+device|"
+    r"clinical\s+trial|histopath|patholog|radiology|oncolog|"
+    r"laboratory\s+information|pharma\s+(engineer|developer)|"
+    r"embedded\s+(linux|software|developer|engineer)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# Freelance / contractor-only signals
+_RE_FREELANCE_TITLE = re.compile(
+    r"\b(freelance|freelancer|freiberuflich)\b", re.IGNORECASE
+)
+_RE_FREELANCE_DESC = re.compile(
+    r"\b("
+    r"freelance\s+only|freelancer\s+only|contractors?\s+only|"
+    r"contract\s+only|self.?employed|auf\s+freiberuflicher\s+basis|"
+    r"als\s+freelancer|no\s+permanent"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# Web analytics focus — GA4, tag management, etc.
+_RE_WEB_ANALYTICS = re.compile(
+    r"\b("
+    r"ga4|google\s+analytics\s+4|looker\s+studio|econda|"
+    r"tag\s+management|google\s+tag\s+manager|\bgtm\b|"
+    r"adobe\s+analytics|piano\s+analytics|web\s+tracking|"
+    r"tracking\s+pixel|conversion\s+tracking|matomo|"
+    r"tag\s+implementation"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# ML/AI signals — if present alongside web analytics, keep the job
+_RE_ML_SIGNALS = re.compile(
+    r"\b("
+    r"machine\s+learning|deep\s+learning|neural\s+network|"
+    r"data\s+science|large\s+language|llm|\bnlp\b|computer\s+vision|"
+    r"model\s+train|pytorch|tensorflow|scikit|xgboost|langchain"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# Non-Germany / Non-EU locations — pre-screener blocklist
+_RE_NONGER_LOC = re.compile(
+    r"\b("
+    # UK
+    r"london|manchester|birmingham|united\s+kingdom\b|"
+    # USA
+    r"new\s+york|san\s+francisco|seattle|boston|chicago|los\s+angeles|"
+    r"austin|denver|atlanta|washington\s+d\.?c\.?|united\s+states\b|\busa\b|"
+    # Canada
+    r"toronto|vancouver|montreal|canada\b|"
+    # Australia / NZ
+    r"sydney|melbourne|brisbane|australia\b|new\s+zealand\b|"
+    # Latin America
+    r"brazil|brasil|colombia|mexico|méxico|argentina|chile|peru|"
+    r"bogot[aá]|são\s+paulo|rio\s+de\s+janeiro|buenos\s+aires|"
+    r"medell[ií]n|santiago|lima|latin\s+america|latam\b|"
+    # Middle East (non-EU)
+    r"dubai|abu\s+dhabi|saudi\s+arabia|qatar|bahrain|kuwait|oman|"
+    r"united\s+arab\s+emirates\b|\buae\b|"
+    # Asia
+    r"singapore|hong\s+kong|tokyo|bangalore|bengaluru|hyderabad|"
+    r"mumbai|delhi|chennai|pune|india\b|china\b|japan\b|"
+    r"south\s+korea\b|taiwan\b|philippines\b|vietnam\b|thailand\b|indonesia\b|"
+    r"malaysia\b|pakistan\b|"
+    # Africa
+    r"nigeria\b|kenya\b|south\s+africa\b|egypt\b|nairobi|lagos|cape\s+town|"
+    r"johannesburg"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# Germany-presence signals — these auto-confirm the role is doable from Berlin
+_GERMANY_TERMS = (
+    "germany", "deutschland", "berlin", "munich", "münchen",
+    "hamburg", "frankfurt", "cologne", "köln", "düsseldorf",
+    "bochum", "dortmund", "essen", "stuttgart", "leipzig",
+    "nrw", "bavaria", "bayern", "saxony", "sachsen", "hessen",
+    "baden-württemberg", "dach",
+    "german market", "german office", "german team",
+)
+
+# Phrases that confirm a remote role accepts Germany-based hires.
+# Required if the location is a non-German EU country (Poland, Spain, France...).
+_REMOTE_COVERS_GERMANY_SIGNALS = (
+    "remote in germany", "remote from germany", "remote within germany",
+    "remote (germany", "germany-remote", "remote-germany",
+    "remote in eu", "remote within the eu", "remote in the european union",
+    "fully remote eu", "fully remote within europe", "fully remote in europe",
+    "remote in europe", "remote within europe", "remote across europe",
+    "remote anywhere in europe", "europe-wide remote", "eu-wide remote",
+    "remote across emea", "we hire across europe", "we hire across the eu",
+    "open to candidates in germany", "based anywhere in europe",
+    "based anywhere in the eu", "you can work from anywhere in europe",
+    "you can work from anywhere in the eu",
+)
+
+# Phrases that REVOKE Germany eligibility — even with "remote", role is locked
+# to a non-EU region.
+_REMOTE_LOCKED_OUT_SIGNALS = (
+    "us-based only", "us only", "united states only", "must be based in the us",
+    "must reside in the us", "us residents only",
+    "uk only", "uk-based only", "must be based in the uk",
+    "canada only", "must be based in canada",
+    "latin america only", "latam only", "remote in latam",
+    "remote in latin america", "india only", "must be based in india",
+    "apac only", "must be based in apac",
+)
+
+# Unpaid / equity-only compensation
+_RE_UNPAID = re.compile(
+    r"\b("
+    r"unpaid\s+(internship|position|role|placement)|"
+    r"equity[\s-]only|no\s+salary|without\s+(pay|compensation|remuneration)|"
+    r"volunteer\s+(position|role|opportunity|basis)|"
+    r"keine\s+(vergütung|bezahlung)|ehrenamtlich(e|er|es)?\b|"
+    r"stipend\s+only|honorarium\s+only"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# Fluent / business / native German required — catches English-language JDs
+# that bury the German requirement in the body.  Sherwan is B1 only.
+_GERMAN_FLUENCY_PHRASES = (
+    "fluent german", "business fluent in german", "business-fluent german",
+    "verhandlungssicheres deutsch", "verhandlungssicher in deutsch",
+    "german native", "native german",
+    "mandatory: english and german", "fluent english and german",
+    "fluent german and english", "german fluency required",
+    "business level german", "business-level german",
+    "professional level german", "professional-level german",
+    "business proficiency in german", "c1 german", "c2 german",
+    "advanced german", "proficient in german",
+    # German-language equivalents
+    "fließend deutsch", "fliessend deutsch", "muttersprachlich deutsch",
+    "deutsch auf muttersprachlichem niveau",
+)
+
+# If any of these appear within ~50 chars of a German-fluency phrase, treat the
+# requirement as soft (nice-to-have, not blocking) and DON'T disqualify.
+_GERMAN_SOFTENING = (
+    "german is a plus", "german would be beneficial", "german preferable",
+    "preferable on german", "advantageous", "nice to have",
+    "wäre von vorteil", "von vorteil",
+)
+
+
+def _requires_fluent_german(d_low: str) -> bool:
+    """
+    True if the description requires fluent/native/business German AND no
+    softening qualifier appears nearby. Surgical: catches Mandatory:
+    English-and-German style phrasing that the existing prompt missed.
+    """
+    for phrase in _GERMAN_FLUENCY_PHRASES:
+        idx = d_low.find(phrase)
+        if idx == -1:
+            continue
+        # Look for softening within +/- 50 chars
+        window_start = max(0, idx - 50)
+        window_end   = idx + len(phrase) + 50
+        window = d_low[window_start:window_end]
+        if any(soft in window for soft in _GERMAN_SOFTENING):
+            continue  # soft requirement — don't disqualify on this match
+        return True
+    return False
+
+
+def _hard_disqualify(j: dict) -> tuple[bool, str, str]:
+    """
+    Run hard pre-screening checks.
+    Returns (True, reason, category)  → score=0, skip Claude.
+    Returns (False, "", "")            → proceed to Claude scoring.
+
+    Category is one of: "experience", "german_required", "senior_title",
+    "non_python", "wrong_domain", "location", "freelance", "web_analytics",
+    "unpaid", "masters_required".  Used by main.py for histogram logging.
+    """
+    title    = (j.get("title")       or "")
+    desc     = (j.get("description") or "")
+    loc      = (j.get("location")    or "")
+    t_low    = title.lower()
+    d_low    = desc.lower()
+    combined = f"{t_low} {d_low}"
+
+    # ── Check 1: Experience requirement ───────────────────────────────────────
+    # 1a. Numeric patterns: "3+ years", "minimum 4 years", "3-5 years experience",
+    #     "with 3+ years", "demonstrated 3 years", "proven 5+ years"
+    if _RE_EXP_NUM.search(d_low):
+        return True, "Requires 3+ years experience", "experience"
+    # 1b. Written-out patterns: "three years", "minimum three (3) years"
+    if _RE_EXP_TEXT.search(d_low):
+        return True, "Requires 3+ years experience (written out)", "experience"
+    # 1c. Title-level seniority: Senior / Lead / Head / Principal in title
+    #     with no junior/entry/intern qualifier → auto-disqualify
+    if _RE_SENIOR_TITLE.search(title):
+        junior_qualifiers = ("junior", "entry", "intern", "graduate", "associate", "jr.")
+        if not any(q in t_low for q in junior_qualifiers):
+            return True, "Senior/Lead title with no junior qualifier", "senior_title"
+
+    # ── Check 2: Fluent German required (English JDs that bury the German req)
+    if _requires_fluent_german(d_low):
+        return True, "Requires fluent/native German — candidate is B1", "german_required"
+
+    # ── Check 3: Non-Python primary language ──────────────────────────────────
+    if _RE_NONPY_TITLE.search(title) and "python" not in combined:
+        return True, "Primary language is not Python (no Python mentioned)", "non_python"
+    for signal in _NONPY_DESC_SIGNALS:
+        if signal in combined and "python" not in combined:
+            return True, f"Primary language appears non-Python ({signal})", "non_python"
+
+    # ── Check 4: Wrong domain ─────────────────────────────────────────────────
+    if _RE_BAD_DOMAIN.search(combined):
+        return True, "Wrong domain (embedded / hardware / biomedical / pharma)", "wrong_domain"
+
+    # ── Check 5: Location — Germany on-site OR remote-that-covers-Germany ─────
+    # Sherwan lives in Bochum (NRW). He needs jobs he can attend from Germany:
+    #   - Germany on-site/hybrid → keep
+    #   - Remote with Germany or EU-wide coverage → keep
+    #   - Anything else (Poland F2F, Spain F2F, US-only remote, LATAM) → drop
+    loc_low      = loc.lower()
+    desc_2000    = d_low[:2000]
+    combined_loc = f"{loc_low} {desc_2000}"
+    has_remote   = "remote" in loc_low or "remote" in desc_2000
+    has_blocked  = bool(_RE_NONGER_LOC.search(loc_low))
+    germany_in_loc_or_desc = (
+        any(t in loc_low    for t in _GERMANY_TERMS) or
+        any(t in desc_2000  for t in _GERMANY_TERMS)
+    )
+    remote_covers_de = any(s in desc_2000 for s in _REMOTE_COVERS_GERMANY_SIGNALS)
+
+    # Hard veto: explicitly locked out of Germany region
+    if any(s in combined_loc for s in _REMOTE_LOCKED_OUT_SIGNALS):
+        return True, "Remote role locked outside Germany (US/UK/LATAM/APAC only)", "location"
+
+    # Non-EU location (LATAM, US, Asia, etc.) and not remote → drop
+    if has_blocked and not has_remote:
+        return True, "Location outside Germany and not remote", "location"
+
+    # Non-EU location + remote, but no Germany/EU coverage → drop
+    if has_blocked and has_remote and not germany_in_loc_or_desc and not remote_covers_de:
+        return True, "Remote based outside Germany — coverage not confirmed", "location"
+
+    # Plain "remote" with zero Germany/EU signal → drop
+    if has_remote and not has_blocked and not germany_in_loc_or_desc and not remote_covers_de:
+        return True, "Remote role — Germany not confirmed as eligible location", "location"
+
+    # Catch-all: location is non-empty, NOT Germany, NOT remote, NOT covered.
+    if loc_low and not germany_in_loc_or_desc and not has_remote and not remote_covers_de:
+        return True, "Location outside Germany and no remote/EU-wide coverage", "location"
+
+    # ── Check 6: Freelance / contractor only ──────────────────────────────────
+    if _RE_FREELANCE_TITLE.search(title):
+        return True, "Freelance role — seeking permanent/fixed-term employment", "freelance"
+    if _RE_FREELANCE_DESC.search(d_low):
+        return True, "Contractor/freelance only — not permanent employment", "freelance"
+
+    # ── Check 7: Web analytics primary focus without ML/AI ───────────────────
+    if _RE_WEB_ANALYTICS.search(combined):
+        if not _RE_ML_SIGNALS.search(combined) and "python" not in combined:
+            return True, "Primary focus is web analytics (GA4/tag management), not ML/AI", "web_analytics"
+
+    # ── Check 8: Unpaid / equity-only ────────────────────────────────────────
+    if _RE_UNPAID.search(d_low):
+        return True, "Unpaid or equity-only role — not paid employment", "unpaid"
+
+    # ── Check 9: Master's degree strictly required (no Bachelor's alternative)
+    bachelor_mentioned = bool(_RE_BACHELOR_OK.search(d_low))
+    if not bachelor_mentioned:
+        if _RE_MASTERS_REQ.search(d_low):
+            return True, "Master's degree required and no Bachelor's alternative — candidate has B.Sc.", "masters_required"
+        ctx = _RE_MASTERS_CONTEXT.search(d_low)
+        if ctx and not _RE_BACHELOR_OK.search(ctx.group(0)):
+            return True, "Master's required under qualifications header — candidate has B.Sc.", "masters_required"
+
+    return False, "", ""
+
+SYSTEM_PROMPT = f"""You are a strict job-matching filter for Sherwan Ali, a final-year Computer Engineering student graduating June 2026. Your job is to score how worth-applying-to each role is. Be honest and conservative. False positives waste Sherwan's time; false negatives are recoverable because he can adjust filters.
+
+CANDIDATE PROFILE:
+{CV_PROFILE}
+
+═══════════════════════════════════════════════════════════════
+SCORING SCALE — be calibrated, not generous
+═══════════════════════════════════════════════════════════════
+- 85-100: Excellent fit. Real shot at interview. Junior/intern level, English-OK, AI/ML/LLM core, no major gaps. Examples: paretos AI Backend Engineer (Claude Code stack mentioned), Enpal Working Student AI Agents.
+- 70-84: Good fit. Worth a tailored application. Minor gaps but core fit is real.
+- 55-69: Decent fit. Apply only if you have time and a tailored angle.
+- 40-54: Weak. Likely auto-rejected. Skip unless desperate.
+- 0-39: Wrong field, wrong stack, wrong seniority, or wrong language requirement.
+
+═══════════════════════════════════════════════════════════════
+HARD CAPS — these set a MAXIMUM score the role can receive.
+Apply the LOWEST applicable cap. Boosts cannot exceed the cap.
+═══════════════════════════════════════════════════════════════
+
+CAP AT 20 if ANY of these are true:
+- Role requires fluent/business/native German (C1+), even if the JD is written in English. Look for: "fluent German", "verhandlungssicheres Deutsch", "Mandatory: English and German", "business-fluent German", "German native". Sherwan is B1.
+- Role requires 5+ years professional experience. Sherwan has zero.
+- Role title contains: Senior, Lead, Principal, Staff, Head of, Director, VP, Vice President, Manager, Architect (without "junior"/"associate" qualifier).
+- Role explicitly requires Master's or PhD with no "Bachelor's or equivalent" alternative. Sherwan has B.Sc. only.
+- Role is in a domain Sherwan has zero exposure to AND requires domain knowledge: energy markets / power trading, public sector / municipal, embedded systems / firmware / FPGA, hardware engineering, biomedical / clinical / pharma, manufacturing OT / SCADA / PLC, financial risk / actuarial.
+
+CAP AT 35 if ANY of these are true:
+- Role requires 3-4 years professional experience.
+- Role is "Data Scientist" or "ML Scientist" with research-track framing (publications, novel research, advanced degree mentioned as preferred).
+- Primary stack is non-Python (Java, Go, Rust, .NET, Scala, C++) without Python listed as acceptable.
+- Role is enterprise data engineering on legacy stacks (SSIS, SQL Server stored procedures, SAP BW, Informatica) without ML/AI work.
+- Role is web analytics / GA4 / tag management primary focus without ML.
+
+CAP AT 50 if ANY of these are true:
+- Role requires 2 years professional experience.
+- Role is data analyst with no ML/AI component (Sherwan's CV is AI/ML, not analyst).
+- Role is general DevOps / platform engineering / Kubernetes primary focus.
+- Role is general full-stack web dev with no AI component.
+
+═══════════════════════════════════════════════════════════════
+TARGET ROLE LADDER — score generously when these match
+═══════════════════════════════════════════════════════════════
+
+TIER 1 (start at 80, then apply caps and adjustments):
+- AI Engineer / LLM Engineer / GenAI Engineer (junior, intern, graduate, or no seniority specified)
+- Applied AI Engineer / Applied AI Scientist (junior level)
+- AI Agent Engineer / Agentic AI Engineer
+- Conversational AI / RAG Engineer
+- Forward Deployed Engineer (AI focus)
+- AI Software Engineer at AI-first startups
+
+TIER 2 (start at 70, then apply caps and adjustments):
+- Junior Machine Learning Engineer
+- Junior Data Scientist
+- Associate Data Scientist
+- ML Engineer (no seniority specified)
+- Data Scientist (no seniority specified, with LLM/AI mentioned)
+
+TIER 3 (start at 60, then apply caps and adjustments):
+- AI Internship / ML Internship / Data Science Internship (paid)
+- Graduate Programme in AI / ML / Data Science
+- Junior Data Analyst with ML/AI angle
+- AI/ML Praktikum (paid)
+
+OFF-TARGET (start at 40, max possible 50 even with boosts):
+- Anything else that mentions Python or AI but isn't core AI/ML work
+
+═══════════════════════════════════════════════════════════════
+BOOSTS — additive, but never exceed the applicable cap
+═══════════════════════════════════════════════════════════════
+
++15: Job description explicitly mentions ANY of:
+- Claude Code, Claude Agent SDK, MCP, custom skills, hooks, plan/execute/review loop
+- LangGraph, LangChain agents, agentic systems, agent workflows, tool calling, function calling
+- These are exactly what Sherwan is building at iseremo and in his projects. Hiring managers who write these in JDs are looking for his profile.
+
++10: Job description explicitly mentions: LLM evaluation frameworks, RAG, vector databases, prompt engineering, fine-tuning (LoRA/QLoRA), Anthropic API, OpenAI API, Hugging Face
+
++8: Working language is explicitly English / international team / "we work in English"
+
++8: Located in NRW (Bochum, Düsseldorf, Cologne, Dortmund, Essen) — Sherwan lives in Bochum, zero relocation friction
+
++5: Located in Berlin, Munich, Hamburg, Frankfurt — major tech hubs, willing to relocate
+
++5: Visa sponsorship not required (Sherwan has full work auth)
+
++5: Company is an English-first AI startup (Aleph Alpha, deepset, parloa, Helsing, Black Forest Labs, n8n, Langfuse, Cohere, Mistral, Hugging Face, Stability)
+
+═══════════════════════════════════════════════════════════════
+PENALTIES — subtractive, applied AFTER caps and boosts
+═══════════════════════════════════════════════════════════════
+
+-15: Role mentions "Master's preferred" (not required, but preferred) — signals the team expects more credentials than Sherwan has
+
+-10: Üsküdar University is unlikely to be recognized; if the company is FAANG-tier or has a strong brand-school hiring pattern (BCG, McKinsey, Google, Meta, top consultancies), apply this penalty.
+
+-10: Role description shows clear mid-level expectations even if title says "junior" (e.g., "ownership of large systems", "mentor others", "drive technical roadmap")
+
+═══════════════════════════════════════════════════════════════
+OUTPUT FORMAT
+═══════════════════════════════════════════════════════════════
+
+Return ONLY a valid JSON array. No preamble, no markdown fences, no commentary.
+Each entry: {{"index": N, "score": 0-100, "reason": "ONE concrete sentence: identify the cap that applied OR the tier match, and the single biggest factor."}}
+
+Examples of good reasons:
+- "Tier 1 AI Engineer match, Claude Code mentioned (+15), English-first, Berlin (+5) → 88"
+- "Capped at 20: explicitly requires fluent German for DACH customer-facing role"
+- "Capped at 35: 3-4 years production ML required, Sherwan has zero"
+- "Capped at 20: Master's required, no Bachelor's alternative in qualifications"
+- "Off-target: enterprise SSIS/SQL Server data engineering, no ML component → 30"
+
+Be terse. The reason exists so Sherwan can audit your decisions, not so you can be polite.
+"""
+
+USER_TEMPLATE = """Score these {n} jobs. Return a JSON array with one object per job in the same order:
+[{{"index": 0, "score": 75, "reason": "one-line reason"}}, ...]
+
+JOBS:
+{jobs_block}"""
+
+
+def _format_job_block(jobs: list[dict]) -> str:
+    lines = []
+    for i, j in enumerate(jobs):
+        lines.append(
+            f"[{i}] Title: {j['title']}\n"
+            f"    Company: {j['company']}\n"
+            f"    Location: {j['location']}\n"
+            f"    Description snippet: {j['description'][:1500] or 'N/A'}"
+        )
+    return "\n\n".join(lines)
+
+
+def _score_batch(batch: list[dict]) -> list[dict]:
+    jobs_block = _format_job_block(batch)
+    prompt = USER_TEMPLATE.format(n=len(batch), jobs_block=jobs_block)
+
+    try:
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1500,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = response.content[0].text.strip()
+
+        # Strip markdown fences if present
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        raw = raw.strip()
+
+        scores = json.loads(raw)
+        for item in scores:
+            idx = item["index"]
+            if 0 <= idx < len(batch):
+                batch[idx]["score"] = item.get("score", 0)
+                batch[idx]["reason"] = item.get("reason", "")
+        return batch
+
+    except Exception as e:
+        print(f"  [Scorer] batch failed: {e}")
+        # Return batch with score 0 so they're still deduplicated
+        return batch
+
+
+def score_jobs(jobs: list[dict]) -> list[dict]:
+    print(f"Scoring {len(jobs)} jobs...")
+
+    # ── Stage 1: hard pre-screening (no Claude API call) ──────────────────────
+    to_score: list[dict] = []
+    prescreened_out = 0
+    for j in jobs:
+        disqualified, reason, category = _hard_disqualify(j)
+        if disqualified:
+            j["score"] = 0
+            j["reason"] = f"[Pre-screened] {reason}"
+            j["disqualified_category"] = category
+            prescreened_out += 1
+        else:
+            j["disqualified_category"] = ""
+            to_score.append(j)
+
+    print(f"  Pre-screened out: {prescreened_out} | Sending to Claude: {len(to_score)}")
+
+    # ── Stage 2: Claude scoring for remaining jobs ─────────────────────────────
+    scored = []
+    for i in range(0, len(to_score), BATCH_SIZE):
+        batch = to_score[i : i + BATCH_SIZE]
+        result = _score_batch(batch)
+        scored.extend(result)
+        time.sleep(1)
+        print(f"  Scored {min(i + BATCH_SIZE, len(to_score))}/{len(to_score)}")
+
+    # Merge Claude-scored jobs with pre-screened (score=0) jobs
+    scored_ids = {j["id"] for j in scored}
+    all_results = scored + [j for j in jobs if j["id"] not in scored_ids]
+    return all_results
