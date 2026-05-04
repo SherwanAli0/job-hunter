@@ -87,10 +87,12 @@ SEARCH_QUERIES = [
 LOCATION = "Germany"
 
 # Minimum Claude score (0–100) to include a job in the digest.
-# 60 = solid fit with minor gaps; 65 was clearing too few jobs (1/day) given
-# the AI/ML junior market in Germany. With a stronger pre-screener filtering
-# obvious mismatches, 60 is the right ceiling for volume vs. signal.
-MIN_SCORE = 60
+# Set to 1: send everything that survived the hard filters, regardless of how
+# Claude rates it. Score is still computed and shown in the email (useful as
+# a hint), but it no longer blocks jobs from reaching you. Pre-screened jobs
+# (Werkstudent, fluent-German-required, 5+ years exp, etc.) get score=0 and
+# are excluded by the >=1 cutoff.
+MIN_SCORE = 1
 
 # Max jobs per email/Notion update
 MAX_RESULTS = 30

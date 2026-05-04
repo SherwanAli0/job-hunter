@@ -14,6 +14,8 @@ SCORE_COLOR = {
     "excellent": "#16a34a",   # green  85+
     "good":      "#2563eb",   # blue   70–84
     "decent":    "#d97706",   # amber  55–69
+    "weak":      "#ea580c",   # orange 40–54
+    "longshot":  "#71717a",   # gray   1–39
 }
 
 # A job posted this recently gets the 🔥 fresh badge — first-mover advantage,
@@ -22,11 +24,16 @@ FRESH_HOURS = 12
 
 
 def _score_label(score: int) -> tuple[str, str]:
+    """Map a 0-100 fit score to a label + colour for the digest table."""
     if score >= 85:
         return "Excellent", SCORE_COLOR["excellent"]
     if score >= 70:
         return "Good", SCORE_COLOR["good"]
-    return "Decent", SCORE_COLOR["decent"]
+    if score >= 55:
+        return "Decent", SCORE_COLOR["decent"]
+    if score >= 40:
+        return "Weak", SCORE_COLOR["weak"]
+    return "Long shot", SCORE_COLOR["longshot"]
 
 
 def _hours_since(posted_at) -> float | None:
