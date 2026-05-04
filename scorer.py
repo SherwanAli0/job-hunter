@@ -54,8 +54,11 @@ _RE_EXP_TEXT = re.compile(
     re.IGNORECASE,
 )
 
-# Master's-required signals — concise + verbose + contextual.
+# Master's-required signals — concise + verbose + contextual + student-status.
 # Used in concert with _RE_BACHELOR_OK below.
+# Catches BOTH "Master's degree required" (full-time roles) AND "currently
+# enrolled in a Master's program" (working-student / internship roles that
+# require active student status, which Sherwan can't claim at a German uni).
 _RE_MASTERS_REQ = re.compile(
     r"(?:"
     r"master(?:'s)?\s+degree\s+(?:is\s+)?required"
@@ -67,6 +70,22 @@ _RE_MASTERS_REQ = re.compile(
     r"|\bm\.sc\.?\s+in\b"
     r"|masterabschluss\s+erforderlich"
     r"|abgeschlossenes\s+masterstudium"
+    # NEW: "Master's program in X" — common in working-student / internship JDs
+    r"|master(?:'s)?\s+program(?:me)?\s+in\b"
+    r"|master(?:'s)?\s+studies\s+in\b"
+    r"|master(?:'s)?\s+studies?\b"
+    # NEW: "currently enrolled in a Master's", "currently doing your Master's",
+    #      "pursuing your Master's", "studying for your Master's"
+    r"|currently\s+enrolled\s+in\s+(?:a\s+)?master"
+    r"|(?:currently\s+)?(?:pursuing|studying|in|doing)\s+(?:for\s+)?(?:a\s+|your\s+|the\s+)?master"
+    # NEW: "Master's student", "MSc student" — student-status requirement
+    r"|master(?:'s)?\s+student\b"
+    r"|\bmsc\s+student\b"
+    r"|\bm\.sc\.?\s+student\b"
+    # NEW: "must be enrolled in a Master's", "you must currently be a student"
+    r"|must\s+be\s+enrolled\s+(?:as\s+a\s+)?(?:in\s+a\s+)?(?:master|student)"
+    r"|you\s+(?:are|must\s+be)\s+(?:currently\s+)?enrolled\s+(?:as\s+a\s+|in\s+a\s+)?(?:master|student)"
+    r"|enrolled\s+in\s+(?:a\s+)?(?:german\s+)?university"
     r")",
     re.IGNORECASE,
 )
@@ -223,6 +242,32 @@ _REMOTE_LOCKED_OUT_SIGNALS = (
     "apac only", "must be based in apac",
 )
 
+# Werkstudent / German-uni-student-only roles.
+# Sherwan's CV: "NOT eligible for Werkstudent — not enrolled at a German university."
+# Werkstudent is a German-law student-employment status; you must be enrolled
+# at a German university to work as one. Drop these unconditionally.
+_RE_WERKSTUDENT_TITLE = re.compile(
+    r"\b(werkstudent|werkstudentin|werk-student|student\s+assistant|student\s+helper|"
+    r"hiwi|studentische[rn]?\s+(mitarbeiter|hilfskraft))\b",
+    re.IGNORECASE,
+)
+_RE_WERKSTUDENT_DESC = re.compile(
+    r"\b("
+    # Explicit Werkstudent mentions in body
+    r"als\s+werkstudent|als\s+werkstudentin|werkstudent(?:in)?\s+\(|"
+    r"werkstudent(?:in)?\s+position|"
+    # "must be enrolled at a German university"
+    r"enrolled\s+at\s+a\s+german\s+university|"
+    r"matriculated\s+at\s+a\s+german\s+university|"
+    r"immatrikuliert\s+an\s+einer\s+(?:deutschen\s+)?universit|"
+    # Restricted to active students
+    r"only\s+(?:open\s+)?(?:to|for)\s+(?:current\s+)?students|"
+    r"must\s+be\s+a\s+(?:current\s+|registered\s+)?student|"
+    r"must\s+currently\s+be\s+(?:a\s+|an\s+|your\s+)?(?:enrolled|registered|active|current)\s+student"
+    r")\b",
+    re.IGNORECASE,
+)
+
 # Unpaid / equity-only compensation
 _RE_UNPAID = re.compile(
     r"\b("
@@ -237,6 +282,10 @@ _RE_UNPAID = re.compile(
 
 # Fluent / business / native German required — catches English-language JDs
 # that bury the German requirement in the body.  Sherwan is B1 only.
+# NOTE: phrasing varies wildly. JDs use "C1 German", "C1 fluency in German",
+# "fluency in German on C1", "C1-level German", "German skills (C1)" etc.
+# We match generously, then rely on the softening check to spare
+# "German is a plus" type mentions.
 _GERMAN_FLUENCY_PHRASES = (
     "fluent german", "business fluent in german", "business-fluent german",
     "verhandlungssicheres deutsch", "verhandlungssicher in deutsch",
@@ -245,11 +294,20 @@ _GERMAN_FLUENCY_PHRASES = (
     "fluent german and english", "german fluency required",
     "business level german", "business-level german",
     "professional level german", "professional-level german",
-    "business proficiency in german", "c1 german", "c2 german",
+    "business proficiency in german",
+    # CEFR level mentions — catch any C1/C2 + German combo regardless of word order
+    "c1 german", "c2 german", "c1-german", "c2-german",
+    "c1 fluency", "c2 fluency", "c1 level", "c2 level",
+    "c1-level", "c2-level", "level c1", "level c2",
+    "fluency in german", "fluency on c1", "fluency on c2",
+    "german (c1", "german (c2", "german c1", "german c2",
+    "german skills (c1", "german skills (c2",
+    "german at c1", "german at c2",
     "advanced german", "proficient in german",
     # German-language equivalents
     "fließend deutsch", "fliessend deutsch", "muttersprachlich deutsch",
-    "deutsch auf muttersprachlichem niveau",
+    "deutsch auf muttersprachlichem niveau", "deutsch auf c1",
+    "deutsch auf c2", "deutschkenntnisse auf c1", "deutschkenntnisse auf c2",
 )
 
 # If any of these appear within ~50 chars of a German-fluency phrase, treat the
@@ -316,6 +374,13 @@ def _hard_disqualify(j: dict) -> tuple[bool, str, str]:
     # ── Check 2: Fluent German required (English JDs that bury the German req)
     if _requires_fluent_german(d_low):
         return True, "Requires fluent/native German — candidate is B1", "german_required"
+
+    # ── Check 2b: Werkstudent / German-uni-student-only roles ─────────────────
+    # Sherwan can't take Werkstudent positions (not enrolled at a German uni).
+    if _RE_WERKSTUDENT_TITLE.search(title):
+        return True, "Werkstudent role — candidate not enrolled at a German university", "werkstudent"
+    if _RE_WERKSTUDENT_DESC.search(d_low):
+        return True, "Requires active student status / Werkstudent — candidate ineligible", "werkstudent"
 
     # ── Check 3: Non-Python primary language ──────────────────────────────────
     if _RE_NONPY_TITLE.search(title) and "python" not in combined:

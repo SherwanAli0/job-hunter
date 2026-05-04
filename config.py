@@ -70,7 +70,7 @@ SEARCH_QUERIES = [
     "GenAI Engineer Germany English",
     "AI Agent Engineer Germany English",
     "Applied AI Engineer Germany English",
-    "Working Student AI Germany English",
+    # Internships are OK — they're employment, not student-status-dependent
     "AI Internship Germany English",
     "ML Internship Germany English",
     "Graduate Data Scientist Germany English",
@@ -87,9 +87,10 @@ SEARCH_QUERIES = [
 LOCATION = "Germany"
 
 # Minimum Claude score (0–100) to include a job in the digest.
-# 65 = "Good fit, worth a tailored application." Below this threshold, roles
-# are likely auto-rejected anyway — not worth Sherwan's application time.
-MIN_SCORE = 65
+# 60 = solid fit with minor gaps; 65 was clearing too few jobs (1/day) given
+# the AI/ML junior market in Germany. With a stronger pre-screener filtering
+# obvious mismatches, 60 is the right ceiling for volume vs. signal.
+MIN_SCORE = 60
 
 # Max jobs per email/Notion update
 MAX_RESULTS = 30
