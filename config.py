@@ -100,29 +100,70 @@ MAX_RESULTS = 30
 # ── Companies with Greenhouse JSON API (free, no scraping needed) ──────────────
 # Add more slugs from: boards-api.greenhouse.io/v1/boards/{SLUG}/jobs
 # Verified: each slug returned 200 OK with > 0 jobs at time of addition.
+# Location filter (_is_attendable_from_germany) drops anything that isn't
+# Germany on-site / hybrid / EU-wide remote, so US-only roles auto-drop.
 GREENHOUSE_SLUGS = [
-    "zalando",
-    "deepl",
-    "deliveryhero",
-    "cognigy",
-    "n26",
-    "sumup",
-    "personio",
-    "celonis",
-    "biontech",
-    "flixbus",
-    "zattoo",
-    "razor-group",
-    # English-first AI startups — added & verified
+    # ── German tech / e-commerce (original list)
+    "zalando", "deepl", "deliveryhero", "cognigy", "n26", "sumup",
+    "personio", "celonis", "biontech", "flixbus", "zattoo", "razor-group",
+    # ── German / EU AI-first startups (verified)
     "parloa",          # 58 jobs, conversational AI agents
     "helsing",         # 105 jobs, defence AI
-    "blackforestlabs", # 12 jobs, image generation models (FLUX)
-    "traderepublic",   # 1 job, fintech with AI/data work
+    "blackforestlabs", # 12 jobs, image generation (FLUX)
+    "traderepublic",   # fintech with AI/data work
     "raisin",          # 49 jobs, Berlin fintech
+    # ── Top AI/ML labs hiring EU-remote
+    "anthropic",       # 397 jobs
+    "scaleai",         # 180 jobs
+    "togetherai",      # 54 jobs
+    "snorkelai",       # 48 jobs
+    "stabilityai",     # 12 jobs
+    "labelbox",        # 10 jobs
+    # ── Data & infra giants with EU hiring
+    "databricks",      # 785 jobs (huge ML hiring)
+    "mongodb",         # 415 jobs
+    "datadog",         # 406 jobs
+    "elastic",         # 152 jobs, Berlin office
+    "grafanalabs",     # 152 jobs
+    "cloudflare",      # 144 jobs
+    "fastly",          # 67 jobs
+    "newrelic",        # 78 jobs
+    "sumologic",       # 47 jobs
+    "honeycomb",       # 12 jobs
+    "planetscale",     # 5 jobs
+    "vercel",          # 78 jobs
+    # ── Berlin / EU consumer & SaaS using Greenhouse
+    "contentful",      # 102 jobs, Berlin tech
+    "scout24",         # 37 jobs, Berlin
+    "freenow",         # 63 jobs, mobility (Berlin/Hamburg)
+    "wolt",            # 286 jobs, EU food delivery
+    "konux",           # 1 job, Munich industrial AI
+    "adahealth",       # 2 jobs, Berlin health AI
+    "isaraerospace",   # 96 jobs, Munich rocket startup with heavy ML
+    # ── International ML-heavy companies (will hit our EU filter)
+    "stripe",          # 478 jobs
+    "adyen",           # 248 jobs, Amsterdam-HQ EU fintech
+    "brex",            # 237 jobs
+    "airbnb",          # 234 jobs
+    "gitlab",          # 173 jobs (remote-first)
+    "intercom",        # 168 jobs
+    "pinterest",       # 162 jobs
+    "twilio",          # 156 jobs
+    "reddit",          # 153 jobs
+    "asana",           # 136 jobs
+    "lyft",            # 125 jobs
+    "instacart",       # 124 jobs
+    "tripadvisor",     # 79 jobs
+    "discord",         # 77 jobs
+    "monzo",           # 68 jobs, UK neobank
+    "amplitude",       # 66 jobs
+    "mercury",         # 56 jobs, fintech
+    "mixpanel",        # 37 jobs
     # NOTE: aleph-alpha, deepset, n8n, langfuse, huggingface, cohere, mistral,
     # kontist, tier-mobility, wandelbots, 1komma5grad, qonto, pigment, circula,
-    # enpal, paretos all 404 on Greenhouse — they use other ATSs (Lever,
-    # Workable, Personio, custom). Look those up separately if you want them.
+    # enpal, paretos, otto, mediamarkt, klarna, statista, babbel, revolut,
+    # wise all 404 on Greenhouse — they use other ATSs (Lever, Workable,
+    # Personio, custom). Look those up separately if you want them.
 ]
 
 # ── Companies with Lever JSON API (free, no scraping needed) ──────────────────
