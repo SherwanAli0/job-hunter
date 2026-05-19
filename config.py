@@ -38,18 +38,26 @@ Work Experience:
   requirements into technical specifications, trained non-technical staff.
 
 Key Projects:
-- Job Hunter — Daily AI-Powered Job Digest (Python, GitHub Actions, Anthropic API, Greenhouse/Lever APIs):
-  Built and shipped end-to-end automated job matching system. Scrapes 15+ company career pages, scores
-  listings 0-100 against a CV using Claude, delivers ranked digest to email every morning via GitHub Actions.
-  Fully automated, zero manual input. Public repo: github.com/SherwanAli0/job-hunter
-- German Language Learning App (React, Vite, Tailwind CSS, Node.js, Anthropic API):
-  Full-stack AI language learning app from scratch. Prompt engineering for contextual exercises, adaptive
-  feedback, and dynamic difficulty. github.com/SherwanAli0/German-App
-- ML Reproducibility Study — Graduation Project (Python, scikit-learn, PyTorch, imbalanced-learn):
-  Verified 143 reported results across 15 datasets and 10 algorithms. ~75,000 configurations over 900+
-  compute-hours. 143/143 replications within 3% average error. github.com/SherwanAli0/csrboost-replication
-- Diabetes Risk Prediction (scikit-learn, imbalanced-learn, Pandas):
-  Full ML pipeline with SMOTE balancing, SVM/KNN comparison. 75.32% accuracy, 81.8% post-SMOTE recall.
+- Forensic Audit of CSRBoost — Graduation Thesis (solo) (Python, scikit-learn, PyTorch, imbalanced-learn):
+  Reverse-engineered Yadav et al. (IEEE Access 2025) over 3 months, ~75,000 configurations, 900+ compute-hours.
+  Mathematically proved the published Table 2 cannot come from any single coherent ML pipeline. Documented
+  eight per-cell undocumented evaluation choices behind 143 of 143 reproduced metrics including test-set
+  leakage on GAN-family methods, mid-table F1-averaging substitution, sub-zero AP thresholds, AP polarity
+  inversion. github.com/SherwanAli0/csrboost-audit
+- FUS Recommender System Replication — 4-author team (Python, NumPy, scikit-learn, GitHub Actions):
+  Replicated D'Aniello et al. (IEEE Access 2026) on MovieLens 100k under 10-fold cross-validation. Owned FUS
+  and CF implementations end-to-end. Reproduced FUS > CF > GIM > PF ordering; MAE_users at k=50 matched
+  paper to four decimals (0.7025 vs 0.703). Co-designed 12-test CI suite on GitHub Actions.
+  github.com/SherwanAli0/Recommender-System-Paper-Replication
+- Daily AI-Powered Job Hunter — solo (Python, GitHub Actions, Anthropic API, Greenhouse/Lever APIs):
+  Built and shipped end-to-end automated job matching system. Scrapes Greenhouse, Lever, plus 15+ German
+  company career pages including Zalando, DeepL, SAP, Siemens, BMW, Bosch, Celonis. Claude scoring 0–100;
+  daily Notion + email digest at 7AM via GitHub Actions. ~50–100 jobs/day at under €0.10/day.
+  github.com/SherwanAli0/job-hunter
+- AI-Powered German Language Learning App — solo (React, Vite, Tailwind, Zustand, Node.js, Anthropic API):
+  Full-stack language learning app: React + Vite frontend, Node.js proxy backend, live LLM integration.
+  Prompt-engineering patterns for contextual exercises, adaptive feedback, dynamic difficulty.
+  github.com/SherwanAli0/German-App
 
 Certifications:
 - IBM AI Engineering Professional Certificate (Sep 2025) — 13 courses: ML, Deep Learning, CV, Transformers,
@@ -142,34 +150,88 @@ GREENHOUSE_SLUGS = [
     "isaraerospace",   # 96 jobs, Munich rocket startup with heavy ML
     # ── International ML-heavy companies (will hit our EU filter)
     "stripe",          # 478 jobs
-    "adyen",           # 248 jobs, Amsterdam-HQ EU fintech
+    "hellofresh",      # 396 jobs (Berlin HQ — moved from LEVER_SLUGS, more jobs here)
+    "okta",            # 370 jobs
+    "verkada",         # 301 jobs
+    "lucidmotors",     # 261 jobs
+    "remotecom",       # 253 jobs
+    "coreweave",       # 248 jobs, GPU cloud — direct AI/ML fit
+    "adyen",           # 248 jobs
     "brex",            # 237 jobs
     "airbnb",          # 234 jobs
+    "xai",             # 221 jobs, Elon's AI
+    "doctolib",        # 213 jobs, EU health
     "gitlab",          # 173 jobs (remote-first)
     "intercom",        # 168 jobs
+    "block",           # 168 jobs (Square's parent)
     "pinterest",       # 162 jobs
     "twilio",          # 156 jobs
     "reddit",          # 153 jobs
+    "fivetran",        # 136 jobs
     "asana",           # 136 jobs
+    "robinhood",       # 134 jobs
     "lyft",            # 125 jobs
+    "smartsheet",      # 124 jobs
     "instacart",       # 124 jobs
+    "postman",         # 118 jobs
+    "flexport",        # 97 jobs
+    "psiquantum",      # 85 jobs, quantum
+    "dialpad",         # 82 jobs
     "tripadvisor",     # 79 jobs
     "discord",         # 77 jobs
+    "gusto",           # 74 jobs
     "monzo",           # 68 jobs, UK neobank
     "amplitude",       # 66 jobs
+    "getyourguide",    # 65 jobs, Berlin
     "mercury",         # 56 jobs, fintech
+    "carta",           # 56 jobs
+    "cabify",          # 56 jobs
+    "tailscale",       # 50 jobs
+    "launchdarkly",    # 49 jobs
+    "autoscout24",     # 41 jobs, Berlin
+    "immoscout24",     # 39 jobs, Berlin
+    "bird",            # 37 jobs
+    "lucidsoftware",   # 37 jobs
+    "project44",       # 37 jobs, logistics ML
     "mixpanel",        # 37 jobs
-    # NOTE: aleph-alpha, deepset, n8n, langfuse, huggingface, cohere, mistral,
-    # kontist, tier-mobility, wandelbots, 1komma5grad, qonto, pigment, circula,
-    # enpal, paretos, otto, mediamarkt, klarna, statista, babbel, revolut,
-    # wise all 404 on Greenhouse — they use other ATSs (Lever, Workable,
-    # Personio, custom). Look those up separately if you want them.
+    "calendly",        # 21 jobs
+    "skyscanner",      # 20 jobs
+    "stockx",          # 20 jobs
+    "tomorrow",        # 16 jobs, Berlin neobank
+    "dominodatalab",   # 13 jobs
+    "wunderkind",      # 12 jobs
+    "wallapop",        # 11 jobs
+    "bitwarden",       # 8 jobs
+    "buynomics",       # 8 jobs, Cologne pricing AI
+    "watershed",       # 8 jobs, climate tech
+    "trivago",         # 7 jobs, Düsseldorf
+    "inflectionai",    # 6 jobs
+    "public",          # 5 jobs
+    "warp",            # 5 jobs, AI terminal
+    "lattice",         # 3 jobs
+    "mercari",         # 3 jobs
+    "solarisbank",     # 3 jobs, Berlin BaaS
+    "netlify",         # 2 jobs
+    "kayak",           # 1 job
+    "lottoland",       # 1 job
+    "medium",          # 1 job
+    # NOTE: aleph-alpha, deepset, n8n, langfuse, huggingface, cohere, kontist,
+    # tier-mobility, wandelbots, 1komma5grad, pigment, circula, enpal,
+    # paretos, otto, mediamarkt, klarna, statista, babbel, revolut, wise all
+    # 404 on Greenhouse — they use other ATSs (Lever, Workable, Personio,
+    # custom). See LEVER_SLUGS below for the ones found on Lever.
 ]
 
 # ── Companies with Lever JSON API (free, no scraping needed) ──────────────────
+# Verified: each slug returned 200 OK with > 0 jobs at time of addition.
+# NOTE: hellofresh moved to GREENHOUSE_SLUGS (396 jobs there vs Lever).
 LEVER_SLUGS = [
-    "hellofresh",
     "nuri",
+    "mistral",         # 161 jobs, top AI lab — Paris, EU-hires
+    "qonto",           # 35 jobs, French fintech, EU remote
+    "moonpay",         # 24 jobs, fintech / crypto
+    "neon",            # 14 jobs, Postgres-as-a-service
+    "trustyou",        # 5 jobs, Munich travel tech
 ]
 
 # ── Major German companies — direct career page scraping ──────────────────────
