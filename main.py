@@ -159,13 +159,54 @@ def _no_experience_overload(j: dict) -> bool:
     return True
 
 
-def _not_fulltime_senior(j: dict) -> bool:
-    """Drop jobs with senior/lead titles — junior and entry level full-time is fine."""
-    title_lower = j["title"].lower()
+# Senior-title detector — robust against ALL the ways recruiters format titles:
+#   "Senior AI Engineer", "Senior_AI_Engineer" (LinkedIn slug),
+#   "Senior-Engineer", "(Senior)", "AI Engineer, Senior",
+#   "Lead/Principal Data Scientist", "Engineer III/IV"
+# Negative lookbehind/lookahead use [a-z] only (NOT \w which includes "_"),
+# so underscores, hyphens, slashes, parens, and brackets all act as boundaries.
+import re as _re_senior
 
-    senior_titles = ("senior ", "lead ", "head of", "principal ", "staff engineer",
-                     "director", "vp ", "vice president", "manager ")
-    if any(t in title_lower for t in senior_titles):
+_RE_SENIOR_IN_TITLE = _re_senior.compile(
+    r"(?<![a-z])"
+    r"(senior|sr\.?|lead|principal|staff[\s_\-]engineer|"
+    r"head[\s_\-]of|director|vice[\s_\-]president|\bvp\b|"
+    r"chief|architect|"
+    r"engineer[\s_\-]+(ii|iii|iv|v)|"
+    r"manager|leiter|leiterin|führung|fuehrung|bereichsleiter)"
+    r"(?![a-z])",
+    _re_senior.IGNORECASE,
+)
+
+
+def _not_fulltime_senior(j: dict) -> bool:
+    """
+    Drop senior/lead/principal/manager/architect/director roles.
+
+    Sherwan is targeting roles with ≤ 2 years of experience. The experience
+    check (_no_experience_overload) already blocks "3+ years" requirements;
+    this filter catches title-level seniority signals even when the JD
+    doesn't state an explicit year count.
+
+    Allows the role through ONLY if a junior/entry/intern/graduate qualifier
+    is also present in the title (e.g. "Junior Engineering Manager" is rare
+    but legitimate).
+    """
+    title = j.get("title", "")
+    title_lower = title.lower()
+
+    if _RE_SENIOR_IN_TITLE.search(title):
+        # Pass-through if explicitly qualified as junior/entry-level.
+        # NOTE: "working student / werkstudent" are NOT here on purpose —
+        # Sherwan is not enrolled at a German university and cannot do those.
+        junior_qualifiers = (
+            "junior", "entry", "entry-level", "entry level",
+            "intern", "internship", "praktikum",
+            "graduate", "grad ", "trainee",
+            "associate", "jr.", "jr ",
+        )
+        if any(q in title_lower for q in junior_qualifiers):
+            return True
         return False
 
     return True

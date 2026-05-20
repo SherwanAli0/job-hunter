@@ -99,10 +99,18 @@ _RE_BACHELOR_OK = re.compile(
     re.IGNORECASE,
 )
 
-# Senior / Lead title — catches any slip-throughs from main.py filter
+# Senior / Lead title — catches any slip-throughs from main.py filter.
+# Uses [a-z] lookbehind/lookahead (NOT \b which considers "_" a word char) so
+# titles like "Senior_AI_Engineer" (LinkedIn slug), "Senior-Engineer",
+# "(Senior)", "AI Engineer, Senior" all match.
 _RE_SENIOR_TITLE = re.compile(
-    r"\b(senior|lead|head\s+of|principal|staff\s+engineer|"
-    r"director|vp\b|vice\s+president)\b",
+    r"(?<![a-z])"
+    r"(senior|sr\.?|lead|principal|staff[\s_\-]engineer|"
+    r"head[\s_\-]of|director|vice[\s_\-]president|\bvp\b|"
+    r"chief|architect|"
+    r"engineer[\s_\-]+(ii|iii|iv|v)|"
+    r"manager|leiter|leiterin|bereichsleiter)"
+    r"(?![a-z])",
     re.IGNORECASE,
 )
 
