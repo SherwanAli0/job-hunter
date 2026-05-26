@@ -1337,6 +1337,120 @@ def scrape_workday_cxs() -> list[dict]:
     return results
 
 
+# ── 16. Adzuna API (aggregator) ──────────────────────────────────────────────
+# Adzuna aggregates German job postings from company career pages that are
+# otherwise impossible to scrape directly (Mercedes-Benz, BMW, VW, Audi,
+# Porsche, Allianz, Deutsche Bank, Bayer, BASF, Henkel, P&G, Unilever, etc.).
+# They've solved the Cloudflare-protected SPA scraping problem; we consume
+# their API.
+#
+# Free tier: 1000 calls/month, 50 results per call.
+# Setup: sign up at https://developer.adzuna.com (5 min), add as GH secrets:
+#   ADZUNA_APP_ID    = your application ID
+#   ADZUNA_APP_KEY   = your API key
+# If either secret is missing, this scraper is a graceful no-op.
+
+_ADZUNA_BASE = "https://api.adzuna.com/v1/api/jobs/de/search/{page}"
+
+# Search terms designed to maximise AI/ML/data coverage in DE
+_ADZUNA_QUERIES = (
+    "machine learning",
+    "data scientist",
+    "AI engineer",
+    "data analyst",
+    "applied scientist",
+    "ML engineer",
+    "data engineer",
+    "Praktikum Data",
+    "Praktikum KI",
+    "Werkstudent AI",  # we drop these later but include for broader coverage
+    "Junior Data",
+    "Junior AI",
+    "LLM engineer",
+    "Python developer",
+)
+
+
+def scrape_adzuna() -> list[dict]:
+    """
+    Pull aggregated job listings from Adzuna for Germany. Adzuna indexes
+    Mercedes, BMW, Allianz, Deutsche Bank, Bayer, P&G, Unilever, etc. that we
+    can't reach via Greenhouse/Lever/Workday/SmartRecruiters.
+
+    No-op if ADZUNA_APP_ID + ADZUNA_APP_KEY env vars (GH secrets) aren't set.
+    """
+    app_id = os.environ.get("ADZUNA_APP_ID", "").strip()
+    app_key = os.environ.get("ADZUNA_APP_KEY", "").strip()
+    if not app_id or not app_key:
+        print("  [Adzuna] ADZUNA_APP_ID / ADZUNA_APP_KEY not set — skipping. "
+              "Sign up at developer.adzuna.com (free) to enable.")
+        return []
+
+    results: list[dict] = []
+    seen_urls: set[str] = set()
+
+    for query in _ADZUNA_QUERIES:
+        try:
+            r = requests.get(
+                _ADZUNA_BASE.format(page=1),
+                params={
+                    "app_id":           app_id,
+                    "app_key":          app_key,
+                    "results_per_page": 50,
+                    "what":             query,
+                    "where":            "Deutschland",  # Germany
+                    "max_days_old":     14,             # last 2 weeks only
+                    "content-type":     "application/json",
+                },
+                headers=HEADERS,
+                timeout=15,
+            )
+            if r.status_code != 200:
+                # Free tier rate limit hit, or auth error
+                if r.status_code == 401:
+                    print(f"  [Adzuna] 401 unauthorized — check APP_ID/APP_KEY")
+                    return []
+                if r.status_code == 429:
+                    print(f"  [Adzuna] 429 rate limit hit on '{query}', stopping early")
+                    break
+                continue
+
+            data = r.json()
+            for posting in data.get("results", []) or []:
+                url = posting.get("redirect_url", "") or posting.get("__CLASS__", "")
+                if not url or url in seen_urls:
+                    continue
+                seen_urls.add(url)
+
+                title = posting.get("title", "") or ""
+                # Adzuna strips HTML from descriptions for us
+                description = posting.get("description", "") or ""
+                company_obj = posting.get("company", {}) or {}
+                company = company_obj.get("display_name", "") or "Unknown"
+                location_obj = posting.get("location", {}) or {}
+                # Use the most specific location available
+                area = location_obj.get("area", []) or []
+                location = ", ".join(area[1:]) if len(area) > 1 else location_obj.get("display_name", "Germany")
+                posted = posting.get("created", "") or ""
+
+                results.append(job(
+                    title=title,
+                    company=company,
+                    location=location,
+                    url=url,
+                    source="Adzuna",
+                    description=description,
+                    posted_at=posted,
+                ))
+            time.sleep(0.5)  # be polite — free tier
+        except Exception as e:
+            print(f"  [Adzuna] query '{query}' failed: {e}")
+            continue
+
+    print(f"  [Adzuna] {len(results)} jobs across {len(_ADZUNA_QUERIES)} queries")
+    return results
+
+
 # ── Main entry point ───────────────────────────────────────────────────────────
 
 def scrape_all() -> list[dict]:
@@ -1353,6 +1467,7 @@ def scrape_all() -> list[dict]:
         scrape_personio,           # German Mittelstand + AI startups (20 companies)
         scrape_smartrecruiters,    # Bosch, Continental, Visa, Roland Berger
         scrape_workday_cxs,        # NVIDIA, Adobe, Salesforce, AstraZeneca, Pfizer, Sanofi, Intel, Philips, etc. (15 tenants)
+        scrape_adzuna,             # Aggregator — Mercedes, BMW, Allianz, DB, P&G, Unilever, etc. (needs ADZUNA_APP_ID/KEY)
         scrape_workday,            # Legacy HTML scraper — kept for any URL it still works on
         scrape_successfactors,     # VW, Adidas, Porsche, etc.
         scrape_greenhouse,         # Zalando, DeepL, Delivery Hero, 108 companies
