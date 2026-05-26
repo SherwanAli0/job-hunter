@@ -262,6 +262,36 @@ PERSONIO_SLUGS = [
     "ada",             # 1
 ]
 
+# ── Workday CXS tenants (modern JSON API) ─────────────────────────────────────
+# Each tuple: (tenant_slug, workday_region, site_name)
+# Discovered manually by HTTP-testing — these all return 200 OK with jobs.
+# The scraper pre-filters titles to AI/ML/data-relevant before fetching the
+# full description per posting (cap 30 per tenant for sane runtime).
+#
+# NOTE: I tested ~50 candidate German DAX companies (Mercedes-Benz, BMW, VW,
+# Audi, Porsche, Bayer, BASF, Henkel, Allianz, Deutsche Bank, Commerzbank,
+# Lufthansa, Vodafone, Deutsche Telekom). NONE of them returned data via
+# Workday — they either use SuccessFactors or their own bespoke ATS. The
+# entries below are companies that DO work and have major German offices.
+WORKDAY_CXS_TENANTS = [
+    # (tenant, region, site_name) — total raw jobs at verification time
+    ("nvidia",      "wd5",  "NVIDIAExternalCareerSite"),   # 2000  jobs — Munich office
+    ("abbott",      "wd5",  "abbottcareers"),              # 2000  jobs — Wiesbaden
+    ("citi",        "wd5",  "2"),                          # 2000  jobs — Frankfurt
+    ("astrazeneca", "wd3",  "Careers"),                    # 1585  jobs — Wedel/Hamburg
+    ("sanofi",      "wd3",  "SanofiCareers"),              # 1473  jobs — Frankfurt
+    ("salesforce",  "wd12", "External_Career_Site"),       # 1441  jobs — Munich/Berlin
+    ("adobe",       "wd5",  "external_experienced"),       # 1193  jobs — Hamburg/Munich
+    ("philips",     "wd3",  "jobs-and-careers"),           # 1026  jobs — Hamburg/Aachen
+    ("kone",        "wd3",  "Careers"),                    # 1000  jobs — Hannover area
+    ("novartis",    "wd3",  "Novartis_Careers"),           # 760   jobs — Nuremberg
+    ("intel",       "wd1",  "External"),                   # 727   jobs — Munich
+    ("gsk",         "wd5",  "GSKCareers"),                 # 708   jobs — Munich
+    ("autodesk",    "wd1",  "Ext"),                        # 648   jobs — Munich
+    ("pfizer",      "wd1",  "PfizerCareers"),              # 493   jobs — Berlin
+    ("workday",     "wd5",  "Workday"),                    # 322   jobs — Munich
+]
+
 # ── Companies on SmartRecruiters (enterprise ATS) ─────────────────────────────
 # Used by Bosch, Continental, and many other industrial/consultancy giants.
 # Public API at api.smartrecruiters.com/v1/companies/{slug}/postings, with

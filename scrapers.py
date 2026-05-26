@@ -42,6 +42,10 @@ try:
     from config import SMARTRECRUITERS_SLUGS
 except ImportError:
     SMARTRECRUITERS_SLUGS: list[str] = []
+try:
+    from config import WORKDAY_CXS_TENANTS
+except ImportError:
+    WORKDAY_CXS_TENANTS: list[tuple[str, str, str]] = []
 
 HEADERS = {
     "User-Agent": (
@@ -1181,6 +1185,158 @@ def scrape_smartrecruiters() -> list[dict]:
     return results
 
 
+# ── 15. Workday CXS API (public POST endpoint) ───────────────────────────────
+# Each Workday-using company exposes a hosted career site at
+# {tenant}.wd{N}.myworkdayjobs.com/{site}. The page is backed by the CXS API:
+#   POST  https://{host}/wday/cxs/{tenant}/{site}/jobs        — list jobs
+#   GET   https://{host}/wday/cxs/{tenant}/{site}/job/{path}  — job detail
+# Public, no auth. Tenant slug + Workday region (wd1, wd3, wd5, wd12) + site
+# name vary per company and must be discovered manually (browser network tab).
+# We pre-filter at title level to AI/ML/data-relevant roles before fetching
+# the full description, otherwise tenants like NVIDIA (2000+ jobs) would
+# spam ~50 description fetches per scrape.
+
+_WD_AI_KEYWORDS = (
+    "machine learning", "deep learning", "data scientist", "data science",
+    "ml engineer", "ml ", "ai engineer", " ai ", "artificial intelligence",
+    "applied scientist", "research scientist", "research engineer",
+    "data engineer", "data analyst", "analytics", "nlp",
+    "computer vision", "llm", "generative", "junior", "intern",
+    "praktikum", "graduate", "associate", "entry level", "entry-level",
+    "python developer", "ml ops", "mlops",
+)
+
+_WD_PAYLOAD = {
+    "appliedFacets": {},
+    "limit": 20,
+    "offset": 0,
+    "searchText": "",
+}
+
+
+def _wd_headers(host: str) -> dict:
+    return {
+        "User-Agent": HEADERS["User-Agent"],
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Origin": f"https://{host}",
+        "Referer": f"https://{host}/",
+    }
+
+
+def _wd_fetch_description(host: str, tenant: str, site: str, external_path: str) -> str:
+    """
+    Second-stage GET to pull the full job description.
+    externalPath from the listing already starts with '/job/...', so the
+    detail URL is just /wday/cxs/{tenant}/{site}{externalPath} — no extra
+    /job/ prefix, that's how Workday wired it.
+    """
+    if not external_path:
+        return ""
+    if not external_path.startswith("/"):
+        external_path = "/" + external_path
+    detail_url = f"https://{host}/wday/cxs/{tenant}/{site}{external_path}"
+    try:
+        r = requests.get(detail_url, headers=_wd_headers(host), timeout=10)
+        if r.status_code != 200:
+            return ""
+        info = (r.json().get("jobPostingInfo") or {})
+        desc_html = info.get("jobDescription", "") or ""
+        # Strip HTML, keep text
+        return BeautifulSoup(desc_html, "html.parser").get_text(separator="\n").strip()
+    except Exception:
+        return ""
+
+
+def scrape_workday_cxs() -> list[dict]:
+    """
+    Scrape Workday CXS endpoints (the modern JSON API). Distinct from the
+    older `scrape_workday()` which scrapes HTML — that one mostly fails on
+    JS-rendered career pages.
+    """
+    results: list[dict] = []
+    for entry in WORKDAY_CXS_TENANTS:
+        if not isinstance(entry, (tuple, list)) or len(entry) != 3:
+            continue
+        tenant, region, site = entry
+        host = f"{tenant}.{region}.myworkdayjobs.com"
+        list_url = f"https://{host}/wday/cxs/{tenant}/{site}/jobs"
+        per_tenant_fetched = 0
+        per_tenant_added = 0
+        offset = 0
+
+        try:
+            while offset < 200:  # safety cap: never walk past 200 postings per tenant
+                payload = dict(_WD_PAYLOAD)
+                payload["offset"] = offset
+                payload["limit"] = 20
+                r = requests.post(
+                    list_url,
+                    json=payload,
+                    headers=_wd_headers(host),
+                    timeout=15,
+                )
+                if r.status_code != 200:
+                    break
+                data = r.json()
+                postings = data.get("jobPostings", []) or []
+                if not postings:
+                    break
+
+                for jp in postings:
+                    title = (jp.get("title") or "").strip()
+                    if not title:
+                        continue
+                    title_low = title.lower()
+
+                    # Pre-filter at title level to AI/ML/data-relevant only.
+                    # NVIDIA has 2000 jobs total; we only want maybe 30 of them.
+                    if not any(k in title_low for k in _WD_AI_KEYWORDS):
+                        continue
+                    # Cap at ~30 relevant jobs per tenant to keep scrape fast
+                    if per_tenant_added >= 30:
+                        break
+
+                    location = (
+                        jp.get("locationsText", "")
+                        or (jp.get("locations") or [{}])[0].get("descriptor", "")
+                        or ""
+                    )
+                    posted = jp.get("postedOn", "") or ""
+                    external_path = jp.get("externalPath", "") or ""
+                    job_url = f"https://{host}{external_path}" if external_path else list_url
+
+                    # Pull full description (one extra GET per relevant job)
+                    desc = _wd_fetch_description(host, tenant, site, external_path)
+                    if not desc:
+                        # Fallback stub if description fetch failed
+                        desc = f"View full job on Workday: {job_url}"
+
+                    results.append(job(
+                        title=title,
+                        company=tenant,
+                        location=location,
+                        url=job_url,
+                        source="Workday-CXS",
+                        description=desc,
+                        posted_at=posted,
+                    ))
+                    per_tenant_added += 1
+                    time.sleep(0.15)  # rate-limit description fetches
+
+                per_tenant_fetched += len(postings)
+                if per_tenant_added >= 30 or len(postings) < 20:
+                    break
+                offset += 20
+                time.sleep(0.3)
+        except Exception as e:
+            print(f"  [WD-CXS/{tenant}] failed: {e}")
+            continue
+
+    print(f"  [WD-CXS] {len(results)} AI/ML-relevant jobs across {len(WORKDAY_CXS_TENANTS)} tenants")
+    return results
+
+
 # ── Main entry point ───────────────────────────────────────────────────────────
 
 def scrape_all() -> list[dict]:
@@ -1196,7 +1352,8 @@ def scrape_all() -> list[dict]:
         scrape_amazon,             # Amazon Jobs API (Germany filter at API level)
         scrape_personio,           # German Mittelstand + AI startups (20 companies)
         scrape_smartrecruiters,    # Bosch, Continental, Visa, Roland Berger
-        scrape_workday,            # BMW, Siemens, Bosch, SAP, etc.
+        scrape_workday_cxs,        # NVIDIA, Adobe, Salesforce, AstraZeneca, Pfizer, Sanofi, Intel, Philips, etc. (15 tenants)
+        scrape_workday,            # Legacy HTML scraper — kept for any URL it still works on
         scrape_successfactors,     # VW, Adidas, Porsche, etc.
         scrape_greenhouse,         # Zalando, DeepL, Delivery Hero, 108 companies
         scrape_lever,              # Mistral, Qonto, MoonPay, Neon, TrustYou, Nuri
