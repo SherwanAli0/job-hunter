@@ -32,6 +32,17 @@ from config import (
     SEARCH_QUERIES,
 )
 
+# These are imported lazily below to allow config.py to define them after the
+# first import; not strictly necessary but defensive against load order issues.
+try:
+    from config import PERSONIO_SLUGS
+except ImportError:
+    PERSONIO_SLUGS: list[str] = []
+try:
+    from config import SMARTRECRUITERS_SLUGS
+except ImportError:
+    SMARTRECRUITERS_SLUGS: list[str] = []
+
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -896,6 +907,280 @@ def scrape_web_search() -> list[dict]:
     return results
 
 
+# ── 12. Amazon Jobs API (custom public JSON) ─────────────────────────────────
+# Amazon is the largest single tech employer in Germany. Their own API is
+# public, no auth, returns JSON. We run multiple queries because their search
+# only matches the query string, not a category.
+
+_AMAZON_API = "https://www.amazon.jobs/en/search.json"
+_AMAZON_QUERIES = (
+    "machine learning", "data scientist", "applied scientist",
+    "AI engineer", "data engineer", "ML engineer",
+    "research scientist", "applied AI", "data analyst",
+    "software development engineer ML", "scientist intern",
+    "machine learning intern", "data science intern",
+)
+
+
+def scrape_amazon() -> list[dict]:
+    """
+    Scrape Amazon Jobs for Germany-based AI/ML/data roles via their public API.
+    Runs multiple targeted queries and dedupes by job_path.
+    """
+    seen_paths: set[str] = set()
+    results: list[dict] = []
+
+    for q in _AMAZON_QUERIES:
+        try:
+            r = requests.get(
+                _AMAZON_API,
+                params={
+                    "base_query": q,
+                    "country": "DEU",  # Germany only at API level
+                    "result_limit": 100,
+                    "offset": 0,
+                },
+                headers=HEADERS,
+                timeout=15,
+            )
+            if r.status_code != 200:
+                continue
+            for jb in r.json().get("jobs", []) or []:
+                path = jb.get("job_path", "")
+                if not path or path in seen_paths:
+                    continue
+                seen_paths.add(path)
+                title = jb.get("title", "") or ""
+                location = (
+                    jb.get("normalized_location", "")
+                    or jb.get("location", "")
+                    or "Germany"
+                )
+                url = "https://www.amazon.jobs" + path
+                desc = (
+                    jb.get("description_short", "")
+                    or jb.get("description", "")
+                    or ""
+                )
+                posted = jb.get("posted_date", "") or jb.get("updated_time", "")
+                results.append(job(
+                    title=title,
+                    company="Amazon",
+                    location=location,
+                    url=url,
+                    source="Amazon",
+                    description=desc,
+                    posted_at=posted,
+                ))
+            time.sleep(0.6)  # be polite to Amazon's endpoint
+        except Exception as e:
+            print(f"  [Amazon] query '{q}' failed: {e}")
+            continue
+
+    print(f"  [Amazon] {len(results)} jobs (deduped across {len(_AMAZON_QUERIES)} queries)")
+    return results
+
+
+# ── 13. Personio XML feeds ───────────────────────────────────────────────────
+# Personio is the German Mittelstand's favourite HR system. Each company has
+# a public XML feed at {slug}.jobs.personio.de/xml — no auth, full descriptions.
+
+def _personio_text(el, tag):
+    """Find a child tag by name and return its text, or empty string."""
+    if el is None:
+        return ""
+    child = el.find(tag)
+    if child is None:
+        return ""
+    return (child.text or "").strip()
+
+
+def scrape_personio() -> list[dict]:
+    """
+    Iterate PERSONIO_SLUGS, parse each company's XML feed, return all positions.
+    Catches German AI/ML/Mittelstand companies that 404 on Greenhouse.
+    """
+    results: list[dict] = []
+    for slug in PERSONIO_SLUGS:
+        try:
+            r = requests.get(
+                f"https://{slug}.jobs.personio.de/xml",
+                headers=HEADERS,
+                timeout=15,
+            )
+            if r.status_code != 200:
+                continue
+            soup = BeautifulSoup(r.text, "xml")
+            positions = soup.find_all("position")
+            company_name = slug.replace("-", " ").title()
+
+            for pos in positions:
+                title = _personio_text(pos, "name") or _personio_text(pos, "title")
+                if not title:
+                    continue
+                location = (
+                    _personio_text(pos, "office")
+                    or _personio_text(pos, "location")
+                    or "Germany"
+                )
+                # Personio URLs come either as <url> or constructed via id
+                url = _personio_text(pos, "url")
+                if not url:
+                    pid = _personio_text(pos, "id")
+                    url = f"https://{slug}.jobs.personio.de/job/{pid}" if pid else ""
+
+                # Build description from nested <jobDescription> blocks
+                desc_parts: list[str] = []
+                for jd in pos.find_all("jobDescription"):
+                    section = _personio_text(jd, "name")
+                    body = _personio_text(jd, "value")
+                    if section:
+                        desc_parts.append(section)
+                    if body:
+                        desc_parts.append(body)
+                # Fallback: <recruitingCategory> or any <description>
+                if not desc_parts:
+                    fallback = (
+                        _personio_text(pos, "description")
+                        or _personio_text(pos, "subcompany")
+                        or _personio_text(pos, "recruitingCategory")
+                    )
+                    if fallback:
+                        desc_parts.append(fallback)
+                desc_raw = "\n\n".join(desc_parts)
+                # Strip nested HTML (Personio descriptions are often HTML inside XML)
+                desc = BeautifulSoup(desc_raw, "html.parser").get_text(separator="\n")
+
+                posted = _personio_text(pos, "createdAt") or _personio_text(pos, "createdDate")
+
+                results.append(job(
+                    title=title,
+                    company=company_name,
+                    location=location,
+                    url=url,
+                    source="Personio",
+                    description=desc,
+                    posted_at=posted,
+                ))
+            time.sleep(0.4)
+        except Exception as e:
+            print(f"  [Personio/{slug}] failed: {e}")
+            continue
+
+    print(f"  [Personio] {len(results)} jobs across {len(PERSONIO_SLUGS)} companies")
+    return results
+
+
+# ── 14. SmartRecruiters API (enterprise ATS) ─────────────────────────────────
+# Used by Bosch, Continental, Visa, Roland Berger, and many other large
+# industrial/consultancy employers. Public API, country pre-filter, no auth.
+
+_SR_API = "https://api.smartrecruiters.com/v1/companies/{slug}/postings"
+# Only run the SR scraper if a relevant role title or function. Postings list
+# does NOT include the full description — that requires per-posting fetch.
+# We keep description as the company industry + function as a stub; main.py
+# filters and Claude will see title + this stub.
+
+_SR_RELEVANT_KEYWORDS = (
+    "data", "ai", "ml", "machine learning", "artificial intelligence",
+    "scientist", "analyst", "intern", "praktikum", "research", "applied",
+    "engineer", "developer", "software", "python", "junior", "graduate",
+    "associate", "computer", "informatik",
+)
+
+
+def scrape_smartrecruiters() -> list[dict]:
+    """
+    Iterate SMARTRECRUITERS_SLUGS, fetch Germany-filtered postings, return jobs.
+    Description is left as a short industry+function stub since fetching the
+    full description per posting would be 5000+ extra HTTP calls (Bosch alone
+    has 4641 postings before filtering).
+    """
+    results: list[dict] = []
+    for slug in SMARTRECRUITERS_SLUGS:
+        try:
+            offset = 0
+            company_total = 0
+            while True:
+                r = requests.get(
+                    _SR_API.format(slug=slug),
+                    params={
+                        "country": "de",  # Germany at API level
+                        "limit": 100,
+                        "offset": offset,
+                    },
+                    timeout=15,
+                )
+                if r.status_code != 200:
+                    break
+                data = r.json()
+                postings = data.get("content", []) or []
+                if not postings:
+                    break
+
+                for p in postings:
+                    title = p.get("name", "") or ""
+                    title_low = title.lower()
+                    # Pre-filter to AI/ML/data-relevant roles — Bosch has
+                    # thousands of roles; we only want the relevant ones
+                    if not any(k in title_low for k in _SR_RELEVANT_KEYWORDS):
+                        continue
+
+                    loc_obj = p.get("location", {}) or {}
+                    location = (
+                        loc_obj.get("fullLocation", "")
+                        or ", ".join(filter(None, [
+                            loc_obj.get("city", ""),
+                            loc_obj.get("country", ""),
+                        ]))
+                        or "Germany"
+                    )
+                    pid = p.get("id", "")
+                    url = f"https://jobs.smartrecruiters.com/{slug}/{pid}" if pid else ""
+
+                    # Build description stub from available metadata
+                    industry = (p.get("industry") or {}).get("label", "")
+                    function = (p.get("function") or {}).get("label", "")
+                    department = (p.get("department") or {}).get("label", "")
+                    experience = (p.get("experienceLevel") or {}).get("label", "")
+                    employment = (p.get("typeOfEmployment") or {}).get("label", "")
+                    desc_parts = [
+                        f"Industry: {industry}" if industry else "",
+                        f"Function: {function}" if function else "",
+                        f"Department: {department}" if department else "",
+                        f"Experience level: {experience}" if experience else "",
+                        f"Employment type: {employment}" if employment else "",
+                        f"View full job: {url}" if url else "",
+                    ]
+                    desc = "\n".join(filter(None, desc_parts))
+
+                    results.append(job(
+                        title=title,
+                        company=slug,
+                        location=location,
+                        url=url,
+                        source="SmartRecruiters",
+                        description=desc,
+                        posted_at=p.get("releasedDate", "") or "",
+                    ))
+                    company_total += 1
+
+                # Pagination
+                if len(postings) < 100:
+                    break
+                offset += 100
+                if offset >= 500:  # safety cap at 500 postings per company
+                    break
+                time.sleep(0.3)
+            time.sleep(0.5)
+        except Exception as e:
+            print(f"  [SmartRecruiters/{slug}] failed: {e}")
+            continue
+
+    print(f"  [SmartRecruiters] {len(results)} relevant jobs across {len(SMARTRECRUITERS_SLUGS)} companies")
+    return results
+
+
 # ── Main entry point ───────────────────────────────────────────────────────────
 
 def scrape_all() -> list[dict]:
@@ -908,10 +1193,13 @@ def scrape_all() -> list[dict]:
         scrape_remotive,           # Free JSON API — remote jobs worldwide
         scrape_hn_who_is_hiring,   # HIDDEN GEM: HN monthly hiring thread (YC-heavy, low competition)
         scrape_arbeitsagentur,     # Official German employment agency API
+        scrape_amazon,             # Amazon Jobs API (Germany filter at API level)
+        scrape_personio,           # German Mittelstand + AI startups (20 companies)
+        scrape_smartrecruiters,    # Bosch, Continental, Visa, Roland Berger
         scrape_workday,            # BMW, Siemens, Bosch, SAP, etc.
         scrape_successfactors,     # VW, Adidas, Porsche, etc.
-        scrape_greenhouse,         # Zalando, DeepL, Delivery Hero, etc.
-        scrape_lever,              # HelloFresh, etc.
+        scrape_greenhouse,         # Zalando, DeepL, Delivery Hero, 108 companies
+        scrape_lever,              # Mistral, Qonto, MoonPay, Neon, TrustYou, Nuri
         scrape_company_pages,      # Direct career pages
         scrape_brave_search,       # Brave web search API
         scrape_web_search,         # DuckDuckGo web search

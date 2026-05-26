@@ -234,6 +234,48 @@ LEVER_SLUGS = [
     "trustyou",        # 5 jobs, Munich travel tech
 ]
 
+# ── Companies with Personio public XML feeds ──────────────────────────────────
+# Personio is the German Mittelstand's HR system. Each company exposes
+# {slug}.jobs.personio.de/xml as a public feed (no auth, full descriptions).
+# These are companies that 404 on Greenhouse — Personio catches them.
+# Verified: each returned 200 OK with > 0 positions.
+PERSONIO_SLUGS = [
+    "1komma5grad",     # 352 positions, solar/energy AI
+    "westwing",        # 61, e-commerce
+    "vivid",           # 19, Berlin fintech
+    "merantix",        # 19, Berlin AI venture studio
+    "pitch",           # 10, presentation SaaS
+    "verivox",         # 9, comparison platform
+    "deepset",         # 6, RAG / search AI
+    "horizn-studios",  # 5, travel goods
+    "snocks",          # 5
+    "circula",         # 4, expense management
+    "celonis",         # 3, process mining (also on Greenhouse)
+    "wandelbots",      # 3, Dresden industrial robotics
+    "candis",          # 3, fintech
+    "audibene",        # 2, healthtech
+    "limehome",        # 2, hospitality
+    "finway",          # 2, fintech
+    "penta",           # 1, banking
+    "smava",           # 2, loan platform
+    "personio",        # 1
+    "ada",             # 1
+]
+
+# ── Companies on SmartRecruiters (enterprise ATS) ─────────────────────────────
+# Used by Bosch, Continental, and many other industrial/consultancy giants.
+# Public API at api.smartrecruiters.com/v1/companies/{slug}/postings, with
+# country=de filter so we only get Germany-eligible jobs.
+# The scraper pre-filters to AI/ML/data-relevant titles since Bosch alone has
+# 4641 active jobs (across all functions). Only relevant ones reach Claude.
+SMARTRECRUITERS_SLUGS = [
+    "BoschGroup",      # 4641 total jobs, ~947 in Germany
+    "Continental",     # 1188 jobs
+    "RolandBerger",    # 213 jobs, top European consultancy
+    "Visa",            # 20 jobs
+    "ContinentalAG",   # 2 jobs (different listing)
+]
+
 # ── Major German companies — direct career page scraping ──────────────────────
 # type: "workday" | "successfactors" | "generic"
 COMPANY_PAGES = [
