@@ -95,15 +95,23 @@ SEARCH_QUERIES = [
 LOCATION = "Germany"
 
 # Minimum Claude score (0–100) to include a job in the digest.
-# Set to 1: send everything that survived the hard filters, regardless of how
-# Claude rates it. Score is still computed and shown in the email (useful as
-# a hint), but it no longer blocks jobs from reaching you. Pre-screened jobs
-# (Werkstudent, fluent-German-required, 5+ years exp, etc.) get score=0 and
-# are excluded by the >=1 cutoff.
-MIN_SCORE = 1
+# 45 is the cutoff for "borderline worth looking at" — anything below is a
+# weak/long-shot match. The notifier tiers the digest into bands:
+#   70-100 → "Apply now"  (Band A)
+#   55-69  → "Worth a look"  (Band B)
+#   45-54  → "Long shots"  (Band C — collapsed at the bottom)
+# Pre-screened jobs (Werkstudent, fluent-German, 5+ years exp, senior title,
+# etc.) get score=0 and are excluded by the >=45 cutoff.
+MIN_SCORE = 45
 
-# Max jobs per email/Notion update
-MAX_RESULTS = 30
+# Per-band caps for email size (no more global MAX_RESULTS truncation that
+# silently hid borderline matches).
+BAND_A_MAX = 20   # high-confidence — always show
+BAND_B_MAX = 20
+BAND_C_MAX = 15
+
+# Legacy alias retained for any code still importing MAX_RESULTS.
+MAX_RESULTS = BAND_A_MAX + BAND_B_MAX + BAND_C_MAX
 
 # ── Companies with Greenhouse JSON API (free, no scraping needed) ──────────────
 # Add more slugs from: boards-api.greenhouse.io/v1/boards/{SLUG}/jobs
@@ -306,82 +314,29 @@ SMARTRECRUITERS_SLUGS = [
     "ContinentalAG",   # 2 jobs (different listing)
 ]
 
-# ── Major German companies — direct career page scraping ──────────────────────
-# type: "workday" | "successfactors" | "generic"
-COMPANY_PAGES = [
-    {
-        "name": "Siemens",
-        "url": "https://jobs.siemens.com/careers?location=Germany&search=data+science",
-        "type": "generic",
-    },
-    {
-        "name": "SAP",
-        "url": "https://jobs.sap.com/search/?q=data+scientist&locname=Germany&country=DE",
-        "type": "generic",
-    },
-    {
-        "name": "BMW Group",
-        "url": "https://www.bmwgroup.jobs/de/en/jobfinder.html?search=data+science",
-        "type": "generic",
-    },
-    {
-        "name": "Bosch",
-        "url": "https://careers.bosch.com/en/jobs/?q=data+scientist&location=Germany",
-        "type": "generic",
-    },
-    {
-        "name": "Continental",
-        "url": "https://jobs.continental.com/en/search/?q=data+scientist&location=Germany",
-        "type": "generic",
-    },
-    {
-        "name": "Infineon",
-        "url": "https://www.infineon.com/cms/en/careers/job-opportunities/?search=data+scientist",
-        "type": "generic",
-    },
-    {
-        "name": "Deutsche Telekom",
-        "url": "https://careers.telekom.com/jobs?q=data+scientist&location=Germany",
-        "type": "generic",
-    },
-    {
-        "name": "E.ON",
-        "url": "https://careers.eon.com/jobs?q=data+scientist&location=Germany",
-        "type": "generic",
-    },
-    {
-        "name": "TUI",
-        "url": "https://careers.tuigroup.com/jobs?q=data+scientist&location=Germany",
-        "type": "generic",
-    },
-    {
-        "name": "CHECK24",
-        "url": "https://careers.check24.de/?s=data",
-        "type": "generic",
-    },
-    {
-        "name": "Volkswagen",
-        "url": "https://www.volkswagenag.com/en/group/careers/job-portal.html",
-        "type": "generic",
-    },
-    {
-        "name": "Allianz",
-        "url": "https://careers.allianz.com/search?q=data+scientist&country=DE",
-        "type": "generic",
-    },
-    {
-        "name": "Munich Re",
-        "url": "https://careers.munichre.com/search?q=data+science&country=DE",
-        "type": "generic",
-    },
-    {
-        "name": "Siemens Healthineers",
-        "url": "https://www.siemens-healthineers.com/en-de/careers/open-positions?q=data+science",
-        "type": "generic",
-    },
-    {
-        "name": "Siemens Advanta",
-        "url": "https://jobs.siemens.com/careers?location=Germany&search=analytics+AI",
-        "type": "generic",
-    },
+# ── Ashby ATS slugs (https://api.ashbyhq.com/posting-api/job-board/{slug}) ────
+# Slug = the final path segment of a company's jobs.ashbyhq.com/{slug} board.
+# Verified: each returned 200 OK with > 0 jobs at time of addition.
+ASHBY_SLUGS = [
+    "ramp",          # 121 jobs, fintech
+    "deepgram",      # 61 jobs, speech AI — direct AI/ML fit
+    "perplexity",    # 59 jobs, frontier AI lab
+    "supabase",      # 43 jobs, dev infra
+    "speak",         # 40 jobs, language learning AI
+    "dust",          # 25 jobs, agent platform (Paris)
+    "linear",        # 23 jobs, dev tools (Berlin office)
+    "browserbase",   # 7 jobs, browser-as-a-service for agents
+    "letta",         # 5 jobs, AI memory
+    "weaviate",      # 4 jobs, vector DB
+    # TODO add more as discovered:
+    # "cursor",      # presumably uses Ashby — verify slug
+    # "anysphere",   # parent of Cursor
+    # "harvey",      # legal AI
+]
+
+# ── Recruitee ATS slugs (https://{slug}.recruitee.com/api/offers) ─────────────
+RECRUITEE_SLUGS = [
+    "limehome",      # 16 jobs, Munich hospitality
+    "personio",      # 1 job
+    # TODO: search for more EU startups using Recruitee
 ]

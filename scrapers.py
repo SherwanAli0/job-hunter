@@ -25,7 +25,6 @@ import requests
 from bs4 import BeautifulSoup
 
 from config import (
-    COMPANY_PAGES,
     GREENHOUSE_SLUGS,
     LEVER_SLUGS,
     LOCATION,
@@ -46,6 +45,14 @@ try:
     from config import WORKDAY_CXS_TENANTS
 except ImportError:
     WORKDAY_CXS_TENANTS: list[tuple[str, str, str]] = []
+try:
+    from config import ASHBY_SLUGS
+except ImportError:
+    ASHBY_SLUGS: list[str] = []
+try:
+    from config import RECRUITEE_SLUGS
+except ImportError:
+    RECRUITEE_SLUGS: list[str] = []
 
 HEADERS = {
     "User-Agent": (
@@ -92,7 +99,10 @@ def scrape_jobspy() -> list[dict]:
                     search_term=query,
                     location=LOCATION,
                     results_wanted=25,
-                    hours_old=24,
+                    # 72h window so one failed daily run doesn't permanently lose
+                    # a day of LinkedIn/Indeed postings; seen_jobs dedup prevents
+                    # repeats from the overlap.
+                    hours_old=72,
                     country_indeed="Germany",
                 )
                 for _, row in df.iterrows():
@@ -425,47 +435,6 @@ def scrape_lever() -> list[dict]:
     return results
 
 
-# ── 6. Company career pages (generic HTML) ────────────────────────────────────
-
-def scrape_company_page(company_cfg: dict[str, Any]) -> list[dict]:
-    results = []
-    name = company_cfg["name"]
-    url = company_cfg["url"]
-    try:
-        r = requests.get(url, headers=HEADERS, timeout=20)
-        soup = BeautifulSoup(r.text, "html.parser")
-
-        # Generic heuristic: look for job-like links
-        job_links = soup.select(
-            "a[href*='job'], a[href*='career'], a[href*='position'], "
-            "a[href*='stelle'], a[href*='vacancy']"
-        )
-        seen_titles = set()
-        for link in job_links[:30]:
-            title = link.get_text(strip=True)
-            href = link.get("href", "")
-            if not title or len(title) < 5 or len(title) > 120:
-                continue
-            if title in seen_titles:
-                continue
-            seen_titles.add(title)
-            job_url = href if href.startswith("http") else f"https://{url.split('/')[2]}{href}"
-            results.append(job(title, name, "Germany", job_url, name))
-    except Exception as e:
-        print(f"  [{name}] failed: {e}")
-    return results
-
-
-def scrape_company_pages() -> list[dict]:
-    results = []
-    for cfg in COMPANY_PAGES:
-        jobs = scrape_company_page(cfg)
-        results.extend(jobs)
-        time.sleep(1)
-    print(f"  [Company pages] {len(results)} jobs")
-    return results
-
-
 # ── 7. Arbeitsagentur (German Federal Employment Agency — official API) ────────
 
 ARBEITSAGENTUR_QUERIES = [
@@ -585,10 +554,15 @@ def scrape_workday() -> list[dict]:
         try:
             jobs = _scrape_workday_tenant(tenant, site, name)
             results.extend(jobs)
+            if jobs:
+                print(f"  [Workday] {name}: {len(jobs)} jobs")
+            else:
+                print(f"  [Workday] {name}: 0 (check tenant/site or Cloudflare-blocked)")
             time.sleep(1)
-        except Exception:
+        except Exception as e:
+            print(f"  [Workday] {name}: ERROR {type(e).__name__}: {e}")
             continue
-    print(f"  [Workday] {len(results)} jobs")
+    print(f"  [Workday] TOTAL {len(results)} jobs across {len(WORKDAY_TENANTS)} tenants")
     return results
 
 
@@ -775,14 +749,25 @@ def _extract_location_hint(text: str) -> str:
     Cheap heuristic to pull a location hint from a JD description.
     Returns the first matching city/country phrase, or empty string if none.
     Used for web-search scrapers where we don't get a structured location field.
-    Returning empty is safe — _is_attendable_from_germany will then treat it as
-    'unknown' and require explicit Germany/EU coverage in the description.
+    Returning empty is now SAFE for keep-on-unknown: main.py's location filter
+    treats empty as 'pass through to the scorer'.
     """
     t = text.lower()[:3000]
-    # German cities first
-    for city in ("berlin", "munich", "münchen", "hamburg", "frankfurt",
-                 "köln", "cologne", "düsseldorf", "stuttgart", "leipzig",
-                 "bochum", "dortmund", "essen", "bonn", "germany", "deutschland"):
+    # German cities first — expanded list per recall fix
+    GERMAN_CITIES = (
+        "berlin", "munich", "münchen", "muenchen", "hamburg", "frankfurt",
+        "köln", "cologne", "düsseldorf", "duesseldorf", "stuttgart", "leipzig",
+        "bochum", "dortmund", "essen", "bonn", "germany", "deutschland",
+        # Newly added cities — expanded recall
+        "heidelberg", "nürnberg", "nuernberg", "nuremberg",
+        "mannheim", "karlsruhe", "aachen", "bremen",
+        "hannover", "hanover", "mainz", "wiesbaden",
+        "münster", "muenster", "augsburg", "freiburg",
+        "bielefeld", "dresden", "duisburg", "wuppertal",
+        "kiel", "lübeck", "luebeck", "rostock", "jena",
+        "kassel", "braunschweig",
+    )
+    for city in GERMAN_CITIES:
         if city in t:
             return city.title()
     # Other places — surface them so the location filter can drop accordingly
@@ -1451,6 +1436,171 @@ def scrape_adzuna() -> list[dict]:
     return results
 
 
+# ── 17. Ashby ATS (used by frontier AI startups: Perplexity, Deepgram, etc.) ─
+# Public, no auth: GET https://api.ashbyhq.com/posting-api/job-board/{slug}
+# Response: top-level "jobs" array. Per-slug try/except so one bad slug
+# never aborts the run.
+
+def scrape_ashby() -> list[dict]:
+    """
+    Pull jobs from each company in ASHBY_SLUGS. Same Germany-eligibility logic
+    as Greenhouse: keep Germany / Deutschland / remote / unknown; downstream
+    filters in main.py make the final call.
+    """
+    results: list[dict] = []
+    if not ASHBY_SLUGS:
+        print("  [Ashby] no slugs configured — skipping")
+        return results
+
+    for slug in ASHBY_SLUGS:
+        try:
+            r = requests.get(
+                f"https://api.ashbyhq.com/posting-api/job-board/{slug}",
+                params={"includeCompensation": "true"},
+                headers=HEADERS,
+                timeout=15,
+            )
+            if r.status_code != 200:
+                print(f"  [Ashby/{slug}] HTTP {r.status_code}")
+                continue
+            data = r.json()
+            per_slug = 0
+            for jp in data.get("jobs", []) or []:
+                if not jp.get("isListed", True):
+                    continue
+
+                title = (jp.get("title") or "").strip()
+                if not title:
+                    continue
+
+                # Location signals — Ashby exposes location, isRemote, workplaceType
+                location = jp.get("location") or ""
+                is_remote = jp.get("isRemote") or jp.get("workplaceType") == "Remote"
+                if is_remote and "remote" not in location.lower():
+                    location = (location + " (Remote)").strip()
+
+                # Same coarse filter as Greenhouse — keep DE / Deutschland /
+                # Remote / Unknown. Downstream filter in main.py decides finally.
+                loc_low = location.lower()
+                if loc_low and not any(k in loc_low for k in (
+                    "germany", "deutschland", "berlin", "munich", "münchen",
+                    "hamburg", "frankfurt", "köln", "cologne", "düsseldorf",
+                    "stuttgart", "bochum", "remote", "eu", "europe",
+                )):
+                    # Skip obviously non-EU specific cities; if location is
+                    # empty/unknown we let it through.
+                    if any(c in loc_low for c in (
+                        "new york", "san francisco", "boston", "chicago",
+                        "los angeles", "seattle", "austin", "denver",
+                        "toronto", "vancouver", "sydney", "melbourne",
+                        "tokyo", "singapore", "mumbai", "delhi", "bangalore",
+                        "bengaluru", "são paulo", "bogotá", "mexico city",
+                        "dubai", "nairobi", "lagos",
+                    )):
+                        continue
+
+                desc = (jp.get("descriptionPlain") or "").strip()
+                if not desc:
+                    # Fall back to HTML description, strip tags
+                    desc_html = jp.get("descriptionHtml") or jp.get("description") or ""
+                    desc = BeautifulSoup(desc_html, "html.parser").get_text(separator="\n").strip()
+                url = jp.get("jobUrl") or jp.get("applyUrl") or ""
+                posted = jp.get("publishedAt") or jp.get("updatedAt") or ""
+
+                results.append(job(
+                    title=title,
+                    company=slug,
+                    location=location or "Unknown",
+                    url=url,
+                    source="Ashby",
+                    description=desc,
+                    posted_at=posted,
+                ))
+                per_slug += 1
+            if per_slug:
+                print(f"  [Ashby/{slug}] {per_slug} jobs")
+            time.sleep(0.3)
+        except Exception as e:
+            print(f"  [Ashby/{slug}] failed: {e}")
+            continue
+
+    print(f"  [Ashby] TOTAL {len(results)} jobs across {len(ASHBY_SLUGS)} companies")
+    return results
+
+
+# ── 18. Recruitee ATS (EU startups) ──────────────────────────────────────────
+# Public, no auth: GET https://{slug}.recruitee.com/api/offers
+
+def scrape_recruitee() -> list[dict]:
+    """
+    Pull jobs from each company in RECRUITEE_SLUGS. Same coarse Germany-
+    eligibility filter as Ashby; downstream filters decide finally.
+    """
+    results: list[dict] = []
+    if not RECRUITEE_SLUGS:
+        print("  [Recruitee] no slugs configured — skipping")
+        return results
+
+    for slug in RECRUITEE_SLUGS:
+        try:
+            r = requests.get(
+                f"https://{slug}.recruitee.com/api/offers",
+                headers=HEADERS,
+                timeout=15,
+            )
+            if r.status_code != 200:
+                print(f"  [Recruitee/{slug}] HTTP {r.status_code}")
+                continue
+            data = r.json()
+            per_slug = 0
+            for offer in data.get("offers", []) or []:
+                title = (offer.get("title") or "").strip()
+                if not title:
+                    continue
+
+                # Recruitee location can be in city/country fields or a
+                # 'location' string. Try multiple.
+                loc_parts = [
+                    offer.get("city", "") or "",
+                    offer.get("country", "") or "",
+                ]
+                location = ", ".join(p for p in loc_parts if p) or (offer.get("location") or "")
+                loc_low = location.lower()
+                # Drop obviously non-EU specific cities; unknown → keep.
+                if loc_low and any(c in loc_low for c in (
+                    "new york", "san francisco", "boston", "chicago",
+                    "los angeles", "seattle", "toronto", "sydney",
+                    "tokyo", "singapore", "mumbai", "bangalore",
+                    "são paulo", "bogotá", "mexico city",
+                )):
+                    continue
+
+                desc_html = offer.get("description") or offer.get("requirements") or ""
+                desc = BeautifulSoup(desc_html, "html.parser").get_text(separator="\n").strip()
+                url = offer.get("careers_url") or offer.get("careers_apply_url") or ""
+                posted = offer.get("created_at") or offer.get("published_at") or ""
+
+                results.append(job(
+                    title=title,
+                    company=slug,
+                    location=location or "Unknown",
+                    url=url,
+                    source="Recruitee",
+                    description=desc,
+                    posted_at=posted,
+                ))
+                per_slug += 1
+            if per_slug:
+                print(f"  [Recruitee/{slug}] {per_slug} jobs")
+            time.sleep(0.3)
+        except Exception as e:
+            print(f"  [Recruitee/{slug}] failed: {e}")
+            continue
+
+    print(f"  [Recruitee] TOTAL {len(results)} jobs across {len(RECRUITEE_SLUGS)} companies")
+    return results
+
+
 # ── Main entry point ───────────────────────────────────────────────────────────
 
 def scrape_all() -> list[dict]:
@@ -1472,7 +1622,8 @@ def scrape_all() -> list[dict]:
         scrape_successfactors,     # VW, Adidas, Porsche, etc.
         scrape_greenhouse,         # Zalando, DeepL, Delivery Hero, 108 companies
         scrape_lever,              # Mistral, Qonto, MoonPay, Neon, TrustYou, Nuri
-        scrape_company_pages,      # Direct career pages
+        scrape_ashby,              # Perplexity, Deepgram, Ramp, Supabase, Linear, etc.
+        scrape_recruitee,          # Limehome and other EU startups
         scrape_brave_search,       # Brave web search API
         scrape_web_search,         # DuckDuckGo web search
     ]:

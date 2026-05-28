@@ -5,15 +5,104 @@ Run locally:  python main.py
 Run on CI:    triggered by GitHub Actions (.github/workflows/daily.yml)
 """
 
+import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
-from config import MAX_RESULTS, MIN_SCORE
+from config import BAND_A_MAX, BAND_B_MAX, BAND_C_MAX, MAX_RESULTS, MIN_SCORE
 from notifier import add_to_notion, send_email
 from scrapers import scrape_all
 from scorer import score_jobs
+
+
+# ── Cross-source dedup ────────────────────────────────────────────────────────
+# Same job listed on LinkedIn + the company's Greenhouse board + a web search
+# creates three competing entries. Normalize (company, title) and keep ONE,
+# preferring the most direct source.
+
+# Higher number = preferred source. ATSs > aggregators > web search.
+_SOURCE_PRIORITY: dict[str, int] = {
+    # Tier 1 — direct company ATSs (cleanest, full descriptions)
+    "Greenhouse":      100,
+    "Lever":            95,
+    "Ashby":            90,
+    "Workday-CXS":      85,
+    "Workday":          80,
+    "Personio":         80,
+    "SmartRecruiters":  78,
+    "Amazon":           76,
+    "Recruitee":        74,
+    # Tier 2 — government / aggregator job boards
+    "Arbeitsagentur":   60,
+    "Arbeitnow":        55,
+    "Remotive":         50,
+    # Tier 3 — HN, search
+    "HN-Hiring":        40,
+    "Adzuna":           38,
+    "BraveSearch":      20,
+    "DuckDuckGoSearch": 18,
+}
+
+# Gender/seniority noise tokens to strip from titles before key construction
+_TITLE_NOISE_RE = re.compile(
+    r"\(\s*(m/w/d|m/f/d|w/m/d|d/m/w|f/m/x|m/f/x|x/m/f|all\s+genders?)\s*\)"
+    r"|\b(m/w/d|m/f/d|w/m/d|d/m/w|f/m/x|m/f/x|all\s+genders?)\b",
+    re.IGNORECASE,
+)
+# Corporate suffixes that don't change the company identity for dedup.
+# We DO NOT strip "ai" because it's part of many AI startup brand names.
+_COMPANY_SUFFIX_RE = re.compile(
+    r"\b(gmbh|ag|se|kg|ohg|inc\.?|ltd\.?|llc|corp\.?|corporation|group|"
+    r"holdings?|technologies|tech)\b\.?$",
+    re.IGNORECASE,
+)
+_WS_RE = re.compile(r"\s+")
+
+
+def _normalize(s: str) -> str:
+    """lowercase, strip gender markers, collapse whitespace."""
+    s = (s or "").lower()
+    s = _TITLE_NOISE_RE.sub(" ", s)
+    s = _WS_RE.sub(" ", s).strip()
+    return s
+
+
+def _normalize_company(s: str) -> str:
+    """Like _normalize but also strips corporate suffixes (GmbH, Inc, …)."""
+    s = _normalize(s)
+    # Strip trailing corporate suffix
+    s = _COMPANY_SUFFIX_RE.sub("", s).strip()
+    s = _WS_RE.sub(" ", s).strip()
+    return s
+
+
+def _dedup_cross_source(jobs: list[dict]) -> list[dict]:
+    """
+    Collapse duplicates across sources keyed on (normalized company, title).
+    Keeps one row per logical job, preferring the highest-priority source.
+    """
+    best: dict[str, dict] = {}
+    for j in jobs:
+        key = f"{_normalize_company(j.get('company',''))}::{_normalize(j.get('title',''))}"
+        if not key.strip(":"):
+            continue
+        prior = best.get(key)
+        if prior is None:
+            best[key] = j
+            continue
+        cur_pri = _SOURCE_PRIORITY.get(j.get("source", ""), 0)
+        prv_pri = _SOURCE_PRIORITY.get(prior.get("source", ""), 0)
+        if cur_pri > prv_pri:
+            # New source wins; preserve URL from kept row (which is the new one).
+            best[key] = j
+        elif cur_pri == prv_pri:
+            # Tie-break: prefer the row with the longer description (more signal)
+            if len(j.get("description", "")) > len(prior.get("description", "")):
+                best[key] = j
+    return list(best.values())
 
 # German words anywhere in the title = German-language role
 _GERMAN_TITLE_KEYWORDS = {
@@ -82,49 +171,99 @@ _REMOTE_LOCKED_OUT_SIGNALS = (
 )
 
 
+# Specific non-EU cities/countries — positive identification triggers drop.
+# Anything NOT in this list and NOT in _GERMANY_TERMS is treated as "unknown"
+# and KEPT, so the scorer can decide from the description.
+_NON_EU_LOCATIONS = (
+    # USA
+    "united states", " usa ", "(usa)", "/usa",
+    "new york", "san francisco", "boston", "chicago", "los angeles",
+    "seattle", "austin", "denver", "atlanta", "washington d.c.",
+    "washington dc", "miami", "philadelphia", "houston", "dallas",
+    # UK
+    "london", "manchester", "birmingham", "united kingdom", " uk ",
+    "(uk)", "/uk", "edinburgh", "glasgow", "leeds",
+    # Canada
+    "toronto", "vancouver", "montreal", "canada",
+    # Australia / NZ
+    "sydney", "melbourne", "brisbane", "australia", "new zealand",
+    # Latin America
+    "brazil", "brasil", "colombia", "mexico", "méxico",
+    "argentina", "chile", "peru",
+    "são paulo", "rio de janeiro", "buenos aires",
+    "bogotá", "bogota", "medellín", "medellin",
+    "santiago", "lima", "mexico city",
+    "latin america", "latam",
+    # Middle East (non-EU)
+    "dubai", "abu dhabi", "saudi arabia", "qatar", "bahrain",
+    "kuwait", "oman", "united arab emirates", " uae ",
+    # Asia
+    "singapore", "hong kong", "tokyo",
+    "bangalore", "bengaluru", "hyderabad", "mumbai", "delhi",
+    "chennai", "pune", " india ", "(india)",
+    "china", " japan ", "south korea", "taiwan",
+    "philippines", "vietnam", "thailand", "indonesia",
+    "malaysia", "pakistan",
+    # Africa
+    "nigeria", "kenya", "south africa", "egypt",
+    "nairobi", "lagos", "cape town", "johannesburg",
+)
+
+
 def _is_attendable_from_germany(j: dict) -> bool:
     """
-    Keep jobs Sherwan can actually do from Berlin:
-      - Germany in location (any city/state)  → keep
-      - "remote" in location with Germany/EU coverage confirmed in description → keep
-      - Non-German location BUT description explicitly says remote-includes-Germany/EU → keep
-      - Anything else (Poland F2F, Spain F2F, Brazil F2F, US-only remote) → drop
+    Recall-friendly location filter:
+      - Empty / unknown location          → KEEP (let scorer decide)
+      - Hard veto (US-only / UK-only etc) → DROP
+      - Germany / DACH / EU coverage      → KEEP
+      - Positively non-EU city            → DROP (Bangalore, NYC, São Paulo, etc.)
+      - Anything else                     → KEEP (unknown wins)
+
+    The change from the previous behaviour: a location string we don't
+    recognise (e.g. "Some Town, Some Country" with no clear signal) used to
+    be dropped. Now it passes through. Recall over precision; the scorer is
+    smart enough to read the description.
     """
-    loc  = (j.get("location")    or "").lower()
+    loc  = (j.get("location")    or "").strip().lower()
     desc = (j.get("description") or "").lower()[:2000]
 
-    # No location → let it through, Claude will score it
-    if not loc and not desc:
+    # Empty location → KEEP (let scorer judge from description)
+    if not loc:
         return True
 
     combined = f"{loc} {desc}"
 
-    # Hard veto: description explicitly locks the role outside Germany
+    # Hard veto: explicit lock to non-EU region
     if any(s in combined for s in _REMOTE_LOCKED_OUT_SIGNALS):
         return False
 
-    # Germany in location → always keep (F2F, hybrid, or remote-Berlin)
+    # Germany or DACH signal in location → keep
     if any(t in loc for t in _GERMANY_TERMS):
         return True
 
-    # Location says "remote" → keep only if Germany or EU coverage is confirmed
+    # "Remote" in location → keep if Germany/EU coverage signal exists
     if "remote" in loc:
         if any(t in combined for t in _GERMANY_TERMS):
             return True
         if any(s in desc for s in _REMOTE_COVERS_GERMANY_SIGNALS):
             return True
-        # "Remote" with zero Germany/EU signal → drop (catches LATAM/US/global remote)
-        return False
-
-    # Location is a specific NON-German place (Warsaw, Paris, Madrid, São Paulo...).
-    # Even if it's an EU country, Sherwan can't physically attend.
-    # ONLY keep if description explicitly says the role is remote-from-Germany or
-    # remote-EU-wide (so Germany is included).
-    if any(s in desc for s in _REMOTE_COVERS_GERMANY_SIGNALS):
+        # Plain "Remote" with no coverage signal — could still be EU/global.
+        # Recall over precision: KEEP and let the scorer judge.
         return True
 
-    # Otherwise drop — Sherwan would have to relocate, which he can't.
-    return False
+    # Positively-identified non-EU city/country → drop
+    # (use loc + first 200 chars of desc to catch JDs like "based in Mumbai")
+    loc_check = f" {loc} {desc[:200]} "
+    if any(s in loc_check for s in _NON_EU_LOCATIONS):
+        # Non-EU positively identified — only keep if description says
+        # explicit remote-from-EU coverage
+        if any(s in desc for s in _REMOTE_COVERS_GERMANY_SIGNALS):
+            return True
+        return False
+
+    # Location is unknown to us — could be a small German town, EU city, etc.
+    # Default KEEP so the scorer can decide.
+    return True
 
 
 def _no_experience_overload(j: dict) -> bool:
@@ -312,9 +451,9 @@ def save_seen(seen: set[str]) -> None:
     SEEN_FILE.write_text(json.dumps(sorted(seen), indent=2))
 
 
-def main() -> None:
+def main(dry_run: bool = False) -> None:
     print("=" * 60)
-    print("  Daily Job Hunter — starting run")
+    print("  Daily Job Hunter — starting run" + ("  [DRY RUN]" if dry_run else ""))
     print("=" * 60)
 
     seen = load_seen()
@@ -322,6 +461,12 @@ def main() -> None:
 
     # ── Scrape ────────────────────────────────────────────────────────────────
     all_jobs = scrape_all()
+
+    # ── Cross-source dedup (before unseen filtering so logs are intuitive) ────
+    before = len(all_jobs)
+    all_jobs = _dedup_cross_source(all_jobs)
+    after = len(all_jobs)
+    print(f"Cross-source dedup: merged {before} jobs, {after} after dedup")
 
     new_jobs = [j for j in all_jobs if j["id"] not in seen]
     print(f"New (unseen) jobs: {len(new_jobs)}")
@@ -370,29 +515,50 @@ def main() -> None:
         bar = "█" * min(count, 40)
         print(f"  {category:22s} {count:4d}  {bar}")
 
+    # ── Tiered bands ─────────────────────────────────────────────────────────
+    # MIN_SCORE = 45 is the absolute floor. Within it, group into 3 bands and
+    # cap each separately instead of a single global MAX_RESULTS truncation.
     good = [j for j in scored if j["score"] >= MIN_SCORE]
     good.sort(key=lambda x: x["score"], reverse=True)
-    top = good[:MAX_RESULTS]
 
-    print(f"\nJobs scoring >= {MIN_SCORE}: {len(good)}")
-    print(f"Sending top {len(top)} to notifications\n")
+    band_a = [j for j in good if j["score"] >= 70][:BAND_A_MAX]
+    band_b = [j for j in good if 55 <= j["score"] < 70][:BAND_B_MAX]
+    band_c = [j for j in good if 45 <= j["score"] < 55][:BAND_C_MAX]
+    top = band_a + band_b + band_c
+
+    print(f"\nBand A (Apply now,   70–100): {len(band_a)} jobs")
+    print(f"Band B (Worth a look, 55–69): {len(band_b)} jobs")
+    print(f"Band C (Long shots,   45–54): {len(band_c)} jobs")
+    print(f"Total in digest: {len(top)}\n")
 
     for j in top[:10]:  # print preview in CI logs
         print(f"  [{j['score']:3d}] {j['title']} @ {j['company']} ({j['source']})")
 
     # ── Notify ────────────────────────────────────────────────────────────────
-    if top:
+    if dry_run:
+        print("\n[DRY RUN] Skipping email + Notion. Pipeline complete.")
+    elif top:
         send_email(top)
         add_to_notion(top)
     else:
         print("No jobs above threshold — no notifications sent.")
 
     # ── Update seen ───────────────────────────────────────────────────────────
-    seen.update(j["id"] for j in new_jobs)
-    save_seen(seen)
-
-    print("\nDone. seen_jobs.json updated.")
+    if not dry_run:
+        seen.update(j["id"] for j in new_jobs)
+        save_seen(seen)
+        print("\nDone. seen_jobs.json updated.")
+    else:
+        print("\n[DRY RUN] seen_jobs.json NOT updated.")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Daily Job Hunter")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=bool(os.environ.get("DRY_RUN")),
+        help="Run the full pipeline but skip email/Notion delivery and don't update seen_jobs.json. Useful for local testing.",
+    )
+    args = parser.parse_args()
+    main(dry_run=args.dry_run)
