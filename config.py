@@ -352,6 +352,30 @@ SMARTRECRUITERS_SLUGS = [
     "ContinentalAG",   # 2 jobs (different listing)
 ]
 
+# ── Major German companies — direct career page scraping ──────────────────────
+# Restored per "attempt everything, tolerate errors" principle. Many of these
+# are JavaScript-rendered SPAs so the generic HTML scraper often pulls only
+# nav links rather than real job titles. That's expected and accepted; the
+# scraper attempts each URL on every run and swallows failures cleanly.
+# type: "workday" | "successfactors" | "generic"
+COMPANY_PAGES = [
+    {"name": "Siemens",            "url": "https://jobs.siemens.com/careers?location=Germany&search=data+science",                          "type": "generic"},
+    {"name": "SAP",                "url": "https://jobs.sap.com/search/?q=data+scientist&locname=Germany&country=DE",                         "type": "generic"},
+    {"name": "BMW Group",          "url": "https://www.bmwgroup.jobs/de/en/jobfinder.html?search=data+science",                               "type": "generic"},
+    {"name": "Bosch",              "url": "https://careers.bosch.com/en/jobs/?q=data+scientist&location=Germany",                              "type": "generic"},
+    {"name": "Continental",        "url": "https://jobs.continental.com/en/search/?q=data+scientist&location=Germany",                         "type": "generic"},
+    {"name": "Infineon",           "url": "https://www.infineon.com/cms/en/careers/job-opportunities/?search=data+scientist",                  "type": "generic"},
+    {"name": "Deutsche Telekom",   "url": "https://careers.telekom.com/jobs?q=data+scientist&location=Germany",                                "type": "generic"},
+    {"name": "E.ON",               "url": "https://careers.eon.com/jobs?q=data+scientist&location=Germany",                                    "type": "generic"},
+    {"name": "TUI",                "url": "https://careers.tuigroup.com/jobs?q=data+scientist&location=Germany",                               "type": "generic"},
+    {"name": "CHECK24",            "url": "https://careers.check24.de/?s=data",                                                                "type": "generic"},
+    {"name": "Volkswagen",         "url": "https://www.volkswagenag.com/en/group/careers/job-portal.html",                                     "type": "generic"},
+    {"name": "Allianz",            "url": "https://careers.allianz.com/search?q=data+scientist&country=DE",                                    "type": "generic"},
+    {"name": "Munich Re",          "url": "https://careers.munichre.com/search?q=data+science&country=DE",                                     "type": "generic"},
+    {"name": "Siemens Healthineers","url":"https://www.siemens-healthineers.com/en-de/careers/open-positions?q=data+science",                  "type": "generic"},
+    {"name": "Siemens Advanta",    "url": "https://jobs.siemens.com/careers?location=Germany&search=analytics+AI",                             "type": "generic"},
+]
+
 # ── Ashby ATS slugs (https://api.ashbyhq.com/posting-api/job-board/{slug}) ────
 # Slug = the final path segment of a company's jobs.ashbyhq.com/{slug} board.
 # Verified: each returned 200 OK with > 0 jobs at time of addition.

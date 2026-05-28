@@ -31,6 +31,13 @@ from config import (
     SEARCH_QUERIES,
 )
 
+# COMPANY_PAGES is restored per "attempt everything, tolerate errors"
+# policy. Import lazily so the file loads even on an older config.
+try:
+    from config import COMPANY_PAGES
+except ImportError:
+    COMPANY_PAGES: list[dict] = []
+
 # These are imported lazily below to allow config.py to define them after the
 # first import; not strictly necessary but defensive against load order issues.
 try:
@@ -1672,6 +1679,193 @@ def scrape_germantechjobs() -> list[dict]:
     return results
 
 
+# ── 20. Generic company career-page scraper (RESTORED) ───────────────────────
+# Many large German companies use JavaScript-rendered SPAs, so this scraper
+# often returns navigation links rather than real job titles. That is expected
+# and accepted under the "attempt everything, tolerate errors" policy. We do
+# not pre-exclude any URL here — every page is attempted on every run, errors
+# are swallowed with a one-line status, and the rest of the pipeline continues.
+
+def scrape_company_page(company_cfg: dict[str, Any]) -> list[dict]:
+    results: list[dict] = []
+    name = company_cfg["name"]
+    url = company_cfg["url"]
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=20)
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        # Generic heuristic: look for job-like links
+        job_links = soup.select(
+            "a[href*='job'], a[href*='career'], a[href*='position'], "
+            "a[href*='stelle'], a[href*='vacancy']"
+        )
+        seen_titles: set[str] = set()
+        for link in job_links[:30]:
+            title = link.get_text(strip=True)
+            href = link.get("href", "")
+            if not title or len(title) < 5 or len(title) > 120:
+                continue
+            if title in seen_titles:
+                continue
+            seen_titles.add(title)
+            job_url = href if href.startswith("http") else f"https://{url.split('/')[2]}{href}"
+            results.append(job(title, name, "Germany", job_url, name))
+    except Exception as e:
+        print(f"  [{name}] failed: {e}")
+    return results
+
+
+def scrape_company_pages() -> list[dict]:
+    results: list[dict] = []
+    for cfg in COMPANY_PAGES:
+        try:
+            jobs = scrape_company_page(cfg)
+            results.extend(jobs)
+        except Exception as e:
+            print(f"  [{cfg.get('name', '?')}] aborted: {e}")
+        time.sleep(1)
+    print(f"  [Company pages] {len(results)} jobs across {len(COMPANY_PAGES)} pages")
+    return results
+
+
+# ── 21. berlinstartupjobs.com RSS (best-effort) ──────────────────────────────
+# Probed earlier and the feed was intermittently behind Cloudflare 403. Per
+# "attempt everything, tolerate errors" we still try the RSS every run and
+# no-op cleanly when the feed isn't reachable.
+
+_BSJ_RSS = "https://berlinstartupjobs.com/feed/"
+
+
+def scrape_berlinstartupjobs() -> list[dict]:
+    results: list[dict] = []
+    try:
+        r = requests.get(_BSJ_RSS, headers=HEADERS, timeout=15)
+        if r.status_code != 200 or "<item" not in r.text:
+            print(f"  [BerlinStartupJobs] HTTP {r.status_code} or no feed, skipping")
+            return results
+        soup = BeautifulSoup(r.text, "xml")
+        for item in soup.find_all("item")[:100]:
+            title = (item.find("title").text if item.find("title") else "").strip()
+            link  = (item.find("link").text  if item.find("link")  else "").strip()
+            if not title or not link:
+                continue
+            posted = (item.find("pubDate").text if item.find("pubDate") else "").strip()
+            desc_html = (item.find("description").text if item.find("description") else "")
+            # Prefer content:encoded when present (richer body)
+            encoded = item.find("encoded")
+            if encoded and len(encoded.text) > len(desc_html):
+                desc_html = encoded.text
+            desc = BeautifulSoup(desc_html or "", "html.parser").get_text(separator="\n").strip()
+            # Company isn't in the feed reliably; categories sometimes carry it
+            cats = [c.text for c in item.find_all("category") if c.text]
+            company = (cats[0] if cats else "Berlin Startup Jobs")
+            results.append(job(
+                title=title,
+                company=company,
+                location="Berlin",   # feed is Berlin-focused by definition
+                url=link,
+                source="BerlinStartupJobs",
+                description=desc,
+                posted_at=posted,
+            ))
+    except Exception as e:
+        print(f"  [BerlinStartupJobs] failed: {e}")
+        return results
+    print(f"  [BerlinStartupJobs] {len(results)} jobs from RSS")
+    return results
+
+
+# ── 22. join.com (best-effort, no public listing API found) ─────────────────
+# Probed earlier and every endpoint variant returned 404 or 401. Per
+# "attempt everything, tolerate errors" we still try a few candidate URLs
+# every run, accept that none may respond, and print a one-line status.
+
+_JOIN_CANDIDATES = (
+    "https://join.com/api/v1/jobs?country=de",
+    "https://join.com/api/companies/jobs?country=de",
+    "https://join.com/feed",
+    "https://join.com/jobs.json",
+    "https://join.com/api/v1/public/jobs",
+)
+
+
+def scrape_join() -> list[dict]:
+    """
+    Best-effort probe of join.com candidate endpoints. As of last check the
+    public API is auth-gated, but we try anyway so we'll pick it up if it
+    ever opens.
+    """
+    results: list[dict] = []
+    for url in _JOIN_CANDIDATES:
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=10)
+            if r.status_code != 200:
+                continue
+            ct = r.headers.get("Content-Type", "")
+            # Try JSON first
+            if "json" in ct.lower() or r.text.lstrip().startswith(("{", "[")):
+                try:
+                    data = r.json()
+                except Exception:
+                    continue
+                # Try common shapes — none confirmed working
+                items = (
+                    data.get("jobs") if isinstance(data, dict) else None
+                    or (data.get("results") if isinstance(data, dict) else None)
+                    or (data if isinstance(data, list) else None)
+                    or []
+                )
+                for it in items[:50]:
+                    title = (it.get("title") or it.get("name") or "").strip()
+                    if not title:
+                        continue
+                    company = (it.get("company") or {}).get("name", "") if isinstance(it.get("company"), dict) else (it.get("company") or "join.com")
+                    location = it.get("location") or it.get("city") or ""
+                    job_url = it.get("url") or it.get("link") or it.get("applyUrl") or ""
+                    desc = it.get("description") or it.get("summary") or ""
+                    posted = it.get("createdAt") or it.get("postedAt") or ""
+                    if isinstance(desc, str) and ("<" in desc and ">" in desc):
+                        desc = BeautifulSoup(desc, "html.parser").get_text(separator="\n").strip()
+                    results.append(job(
+                        title=title,
+                        company=company,
+                        location=str(location) or "Germany",
+                        url=str(job_url),
+                        source="Join",
+                        description=str(desc),
+                        posted_at=str(posted),
+                    ))
+                if results:
+                    print(f"  [Join] {len(results)} jobs from {url}")
+                    return results
+            # Try XML/RSS if it looks like a feed
+            if "<item" in r.text or "<entry" in r.text:
+                soup = BeautifulSoup(r.text, "xml")
+                for item in soup.find_all("item")[:50] or soup.find_all("entry")[:50]:
+                    title = (item.find("title").text if item.find("title") else "").strip()
+                    link  = (item.find("link").text  if item.find("link")  else "").strip()
+                    if title and link:
+                        desc = (item.find("description").text if item.find("description") else "")
+                        desc = BeautifulSoup(desc or "", "html.parser").get_text().strip()
+                        results.append(job(
+                            title=title,
+                            company="join.com",
+                            location="Germany",
+                            url=link,
+                            source="Join",
+                            description=desc,
+                            posted_at=(item.find("pubDate").text if item.find("pubDate") else ""),
+                        ))
+                if results:
+                    print(f"  [Join] {len(results)} jobs from {url}")
+                    return results
+        except Exception as e:
+            # try the next candidate URL; don't abort
+            continue
+    print(f"  [Join] no public endpoint responded — skipping (will retry next run)")
+    return results
+
+
 # ── Main entry point ───────────────────────────────────────────────────────────
 
 def scrape_all() -> list[dict]:
@@ -1698,6 +1892,9 @@ def scrape_all() -> list[dict]:
         scrape_ashby,              # Perplexity, Deepgram, Ramp, Supabase, Linear, etc.
         scrape_recruitee,          # Limehome and other EU startups
         scrape_germantechjobs,     # germantechjobs.de RSS — German tech aggregator
+        scrape_berlinstartupjobs,  # berlinstartupjobs.com RSS (best-effort, Cloudflare-intermittent)
+        scrape_join,               # join.com (best-effort, no confirmed public endpoint)
+        scrape_company_pages,      # Generic German company pages (restored, noisy but attempted)
         scrape_brave_search,       # Brave web search API
         scrape_web_search,         # DuckDuckGo web search
     ]:
