@@ -91,12 +91,25 @@ def _freshness_badge(posted_at: str) -> str:
     return ""
 
 
-def _row_html(j: dict) -> tuple[str, bool]:
-    """Render a single job row. Returns (html, is_fresh)."""
-    label, color = _score_label(j["score"])
-    badge = _freshness_badge(j.get("posted_at", ""))
-    is_fresh = "🔥" in badge
-    html = f"""
+def _build_html(jobs: list[dict]) -> str:
+    today = date.today().strftime("%d %b %Y")
+
+    # Sort jobs so that fresh ones bubble to the top within their score band
+    def _sort_key(j):
+        h = _hours_since(j.get("posted_at", ""))
+        # primary: score (desc), secondary: fresher first (None → far past)
+        fresh_rank = h if h is not None else 1e9
+        return (-j.get("score", 0), fresh_rank)
+    jobs = sorted(jobs, key=_sort_key)
+
+    rows = ""
+    fresh_count = 0
+    for j in jobs:
+        label, color = _score_label(j["score"])
+        badge = _freshness_badge(j.get("posted_at", ""))
+        if "🔥" in badge:
+            fresh_count += 1
+        rows += f"""
         <tr>
           <td style="padding:10px 8px;border-bottom:1px solid #e5e7eb;">
             <a href="{j['url']}" style="font-weight:600;color:#111827;text-decoration:none;font-size:14px;">
@@ -112,64 +125,10 @@ def _row_html(j: dict) -> tuple[str, bool]:
             <span style="color:#9ca3af;font-size:11px;">{j['source']}</span>
           </td>
         </tr>"""
-    return html, is_fresh
 
-
-def _band_section(title: str, subtitle: str, accent: str, jobs: list[dict], collapsed: bool = False) -> tuple[str, int]:
-    """Render a band (Apply now / Worth a look / Long shots). Returns (html, fresh_count)."""
-    if not jobs:
-        return "", 0
-
-    # Sort: highest score first, then fresher first within score
-    def _sort_key(j):
-        h = _hours_since(j.get("posted_at", ""))
-        return (-j.get("score", 0), h if h is not None else 1e9)
-    jobs = sorted(jobs, key=_sort_key)
-
-    rows_html = ""
-    fresh = 0
-    for j in jobs:
-        row, is_fresh = _row_html(j)
-        rows_html += row
-        if is_fresh:
-            fresh += 1
-
-    table_style = "opacity:0.85;" if collapsed else ""
-    return f"""
-      <div style="margin-top:14px;">
-        <div style="padding:10px 14px;background:{accent};border-radius:6px 6px 0 0;color:#fff;">
-          <div style="font-size:14px;font-weight:700;">{title} <span style="font-weight:400;opacity:0.85;">({len(jobs)})</span></div>
-          <div style="font-size:12px;opacity:0.9;">{subtitle}</div>
-        </div>
-        <table style="width:100%;border-collapse:collapse;{table_style}">
-          <tbody>{rows_html}</tbody>
-        </table>
-      </div>""", fresh
-
-
-def _build_html(jobs: list[dict]) -> str:
-    today = date.today().strftime("%d %b %Y")
-
-    # Group into bands
-    band_a = [j for j in jobs if j.get("score", 0) >= 70]
-    band_b = [j for j in jobs if 55 <= j.get("score", 0) < 70]
-    band_c = [j for j in jobs if 45 <= j.get("score", 0) < 55]
-
-    sec_a, fa = _band_section(
-        "🟢 Apply now", "Strong fit · score 70–100",
-        "#16a34a", band_a, collapsed=False,
-    )
-    sec_b, fb = _band_section(
-        "🔵 Worth a look", "Decent fit · score 55–69",
-        "#2563eb", band_b, collapsed=False,
-    )
-    sec_c, fc = _band_section(
-        "⚪ Long shots", "Borderline · score 45–54 · skim only",
-        "#71717a", band_c, collapsed=True,
-    )
-
-    fresh_count = fa + fb + fc
-    fresh_summary = f" · 🔥 {fresh_count} posted in last {FRESH_HOURS}h" if fresh_count else ""
+    fresh_summary = ""
+    if fresh_count:
+        fresh_summary = f" · 🔥 {fresh_count} posted in last {FRESH_HOURS}h"
 
     return f"""<!DOCTYPE html>
 <html>
@@ -181,12 +140,20 @@ def _build_html(jobs: list[dict]) -> str:
     <div style="background:#1e3a5f;padding:24px 28px;">
       <h1 style="color:#fff;margin:0;font-size:20px;">🎯 Job Digest — {today}</h1>
       <p style="color:#93c5fd;margin:6px 0 0;font-size:14px;">
-        {len(jobs)} matches · Apply&nbsp;now {len(band_a)} · Worth&nbsp;a&nbsp;look {len(band_b)} · Long&nbsp;shots {len(band_c)}{fresh_summary}
+        {len(jobs)} new matches · fresh first{fresh_summary}
       </p>
     </div>
 
     <div style="padding:20px 28px;">
-      {sec_a}{sec_b}{sec_c}
+      <table style="width:100%;border-collapse:collapse;">
+        <thead>
+          <tr style="background:#f3f4f6;">
+            <th style="padding:8px;text-align:left;font-size:12px;color:#6b7280;text-transform:uppercase;">Role</th>
+            <th style="padding:8px;text-align:center;font-size:12px;color:#6b7280;text-transform:uppercase;width:150px;">Score</th>
+          </tr>
+        </thead>
+        <tbody>{rows}</tbody>
+      </table>
     </div>
 
     <div style="padding:16px 28px;background:#f9fafb;border-top:1px solid #e5e7eb;">

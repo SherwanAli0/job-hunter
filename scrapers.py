@@ -92,16 +92,16 @@ def scrape_jobspy() -> list[dict]:
         from jobspy import scrape_jobs  # type: ignore
 
         results = []
-        for query in SEARCH_QUERIES[:8]:  # limit to avoid rate limits
+        # Widen recall: 15 queries (was 8) × 40 results (was 25) per site,
+        # with the 72h window kept so one failed daily run doesn't lose
+        # a day of postings; seen_jobs dedup handles the overlap.
+        for query in SEARCH_QUERIES[:15]:
             try:
                 df = scrape_jobs(
                     site_name=["linkedin", "indeed"],  # glassdoor = Cloudflare blocked
                     search_term=query,
                     location=LOCATION,
-                    results_wanted=25,
-                    # 72h window so one failed daily run doesn't permanently lose
-                    # a day of LinkedIn/Indeed postings; seen_jobs dedup prevents
-                    # repeats from the overlap.
+                    results_wanted=40,
                     hours_old=72,
                     country_indeed="Germany",
                 )
@@ -1682,7 +1682,9 @@ def scrape_all() -> list[dict]:
         scrape_jobspy,             # LinkedIn + Indeed
         scrape_arbeitnow,          # Free JSON API — English jobs, Germany-focused
         scrape_remotive,           # Free JSON API — remote jobs worldwide
-        scrape_hn_who_is_hiring,   # HIDDEN GEM: HN monthly hiring thread (YC-heavy, low competition)
+        # HN-Hiring DISABLED — produced dead links and unparseable rows.
+        # The function is kept defined in case we want it back with cleaning.
+        # scrape_hn_who_is_hiring,
         scrape_arbeitsagentur,     # Official German employment agency API
         scrape_amazon,             # Amazon Jobs API (Germany filter at API level)
         scrape_personio,           # German Mittelstand + AI startups (20 companies)

@@ -12,7 +12,7 @@ import re
 import sys
 from pathlib import Path
 
-from config import BAND_A_MAX, BAND_B_MAX, BAND_C_MAX, MAX_RESULTS, MIN_SCORE
+from config import MAX_RESULTS, MIN_SCORE
 from notifier import add_to_notion, send_email
 from scrapers import scrape_all
 from scorer import score_jobs
@@ -52,18 +52,15 @@ _TITLE_NOISE_RE = re.compile(
     r"|\b(m/w/d|m/f/d|w/m/d|d/m/w|f/m/x|m/f/x|all\s+genders?)\b",
     re.IGNORECASE,
 )
-# Corporate suffixes stripped from the END of company names. Per review,
-# this list includes "ai" / "labs" too — necessary for matching
-# "Mistral AI" against "mistral", "Stability AI" against "stability", etc.
-# Known tradeoff: "Open AI" → "open" while "OpenAI" → "openai" (one token,
-# no internal word boundary, so suffix regex can't fire). Rare in practice.
-# Applied REPEATEDLY so "X Labs Inc" → "X labs" → "X" → "x" all collapse.
+# Legal-form suffixes only — these are clearly the same company with/without
+# the corporate-form word ("X GmbH" = "X"). We do NOT strip generic words
+# like "group", "tech", "labs", "ai" — those identify genuinely different
+# companies (e.g. "Acme AI" and "Acme" may be unrelated, "Foo Group" is a
+# distinct entity from "Foo"). Over-aggressive stripping caused false merges.
 _COMPANY_SUFFIX_RE = re.compile(
-    r"\s+(ai|labs|inc|incorporated|gmbh|ag|se|kg|ohg|ltd|limited|llc|"
-    r"corp|corporation|group|holdings?|technologies|tech)\.?$",
+    r"\s+(gmbh|ag|se|kg|ohg|inc|incorporated|ltd|limited|llc)\.?$",
     re.IGNORECASE,
 )
-_NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 _WS_RE = re.compile(r"\s+")
 
 
@@ -77,23 +74,14 @@ def _normalize(s: str) -> str:
 
 def _normalize_company(s: str) -> str:
     """
-    Aggressively normalize a company name for dedup keys:
-      1. lowercase, strip gender markers, collapse whitespace
-      2. repeatedly strip trailing tokens (ai, labs, inc, gmbh, ltd, …)
-      3. remove ALL non-alphanumeric characters
-    So both "Delivery Hero" and "Deliveryhero" collapse to "deliveryhero",
-    "Mistral AI" and "mistral" collapse to "mistral",
-    "Stability AI Labs Inc." collapses to "stability".
+    Conservative dedup key: lowercase, whitespace trim, strip ONLY legal forms.
+    No non-alphanumeric stripping — that was collapsing genuinely different
+    companies into one. When two rows aren't clearly the same company, we
+    prefer to keep both rather than merge them.
     """
     s = _normalize(s)
-    # Strip trailing tokens repeatedly so "X Labs Inc" → "X labs" → "X"
-    for _ in range(5):  # cap to avoid infinite loop on pathological input
-        new = _COMPANY_SUFFIX_RE.sub("", s).strip()
-        if new == s:
-            break
-        s = new
-    # Remove all non-alphanumeric: spaces, punctuation, accents stripped to nothing
-    s = _NON_ALNUM_RE.sub("", s)
+    # Strip trailing legal form once
+    s = _COMPANY_SUFFIX_RE.sub("", s).strip()
     return s
 
 
@@ -285,32 +273,77 @@ def _is_attendable_from_germany(j: dict) -> bool:
 
 
 def _no_experience_overload(j: dict) -> bool:
-    """Drop jobs that require 3+ years of experience anywhere in the description."""
-    import re
-    desc_lower = (j.get("description") or "").lower()
+    """
+    DROP jobs requiring a minimum experience of 2 or more years.
 
-    patterns = [
-        # "3+ years of [any qualifier] experience" — covers industry/hands-on/
-        # relevant/practical/professional/work/applicable/proven experience
-        r"\b([3-9]|\d{2})\+?\s*years?\s+(?:of\s+)?(?:[\w-]+\s+){0,3}experience",
-        # "3+ years experience" or "3 years experience" without "of"
-        r"\b([3-9]|\d{2})\+?\s*years?\s+experience",
-        # "minimum 3 years"
-        r"\bminimum\s*(?:of\s*)?([3-9]|\d{2})\s*\+?\s*years?",
-        # "at least 3 years"
-        r"\bat\s+least\s+([3-9]|\d{2})\+?\s*years?",
-        # "3-5 years" / "3–5 years" — range form
-        r"\b([3-9]|\d{2})\s*[-–]\s*\d+\s*years?\s+(?:of\s+)?(?:[\w-]+\s+){0,3}experience",
-        # "3+ years Python" — bare "3+ years <skill>" (the + sign is the signal)
-        r"\b([3-9]|\d{2})\+\s*years?",
-        # "experience: 3+ years"
-        r"\bexperience\s*:?\s*([3-9]|\d{2})\+?\s*years?",
-        # Written-out forms: "three years", "minimum five years"
-        r"\b(three|four|five|six|seven|eight|nine|ten)\s+(?:\(\s*\d+\s*\)\s+)?years?\s+(?:of\s+)?(?:[\w-]+\s+){0,3}experience",
-        r"\b(minimum|at\s+least)\s+(of\s+)?(three|four|five|six|seven|eight|nine|ten)\s+(?:\(\s*\d+\s*\)\s+)?years?",
-    ]
-    for pattern in patterns:
-        if re.search(pattern, desc_lower):
+    Matches (the value extracted is the LOWER bound, then compared to 2):
+      - "N+ years", "N years experience", "minimum N years", "at least N years"
+      - "N-M years" / "N to M years"          (range — only N matters)
+      - German: "N+ Jahre", "N Jahre Berufserfahrung", "mindestens N Jahre"
+      - Written-out: "two/three/.../ten years experience"
+
+    KEEPS when:
+      - Lower bound < 2: "1-2 years", "0-2 years", "1+ year", "up to 2 years"
+      - The number isn't experience (calendar year, team size, salary, version)
+        — guarded by requiring "year(s)" / "Jahre" / "Berufserfahrung" adjacency
+        and the number on the LEFT side of a range, not the right.
+    """
+    import re
+    desc = (j.get("description") or "").lower()
+
+    written = {"one":1, "two":2, "three":3, "four":4, "five":5,
+               "six":6, "seven":7, "eight":8, "nine":9, "ten":10}
+
+    # 1. "N+ years" — the + sign is always a minimum
+    for m in re.finditer(r"(?<![-\d])(\d+)\+\s*years?\b", desc):
+        if int(m.group(1)) >= 2:
+            return False
+    # 2. "N-M years" / "N–M years" / "N to M years" — N is the minimum
+    for m in re.finditer(r"(?<![-\d])(\d+)\s*(?:[-–]|to)\s*\d+\s*years?\b", desc):
+        if int(m.group(1)) >= 2:
+            return False
+    # 3. "minimum N years" / "at least N years"
+    for m in re.finditer(r"\b(?:minimum|at\s+least)\s+(?:of\s+)?(\d+)\+?\s*years?\b", desc):
+        if int(m.group(1)) >= 2:
+            return False
+    # 4. "N years (of) experience" — bare; require explicit "experience" word and
+    #    block matches that are the right-hand side of a range or after "up to".
+    bare_pat = re.compile(
+        r"(?<![-\d])(?<!up to )(?<!up\sto)(?<!maximum )(?<!max )"
+        r"(\d+)\s*years?\s+(?:of\s+)?(?:[\w-]+\s+){0,3}experience\b"
+    )
+    for m in bare_pat.finditer(desc):
+        if int(m.group(1)) >= 2:
+            return False
+    # 5. "experience: N years" / "experience: N+ years"
+    for m in re.finditer(r"\bexperience\s*:?\s*(\d+)\+?\s*years?\b", desc):
+        if int(m.group(1)) >= 2:
+            return False
+    # 6. German — "N+ Jahre" / "N Jahre Berufserfahrung" / "mindestens N Jahre"
+    for m in re.finditer(r"(?<![-\d])(\d+)\+\s*jahre\b", desc):
+        if int(m.group(1)) >= 2:
+            return False
+    for m in re.finditer(r"(?<![-\d])(\d+)\s*jahre\s+berufserfahrung", desc):
+        if int(m.group(1)) >= 2:
+            return False
+    for m in re.finditer(r"\bmindestens\s+(\d+)\+?\s*jahre\b", desc):
+        if int(m.group(1)) >= 2:
+            return False
+    # 7. Written-out English forms
+    for m in re.finditer(
+        r"\b(one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:\(\d+\)\s+)?"
+        r"years?\s+(?:of\s+)?(?:[\w-]+\s+){0,3}experience\b",
+        desc,
+    ):
+        if written[m.group(1)] >= 2:
+            return False
+    for m in re.finditer(
+        r"\b(?:minimum|at\s+least)\s+(?:of\s+)?"
+        r"(one|two|three|four|five|six|seven|eight|nine|ten)\s+"
+        r"(?:\(\d+\)\s+)?years?\b",
+        desc,
+    ):
+        if written[m.group(1)] >= 2:
             return False
 
     return True
@@ -369,59 +402,72 @@ def _not_fulltime_senior(j: dict) -> bool:
     return True
 
 
+# Trigger phrases for Masters / MSc / PhD detection
+_MASTERS_TRIGGER_PATTERNS = (
+    r"\bmaster(?:'s|s)?\s+degree\b",
+    r"\bmsc\b",
+    r"\bm\.sc\.?\b",
+    r"\bphd\b",
+    r"\bph\.\s?d\.?\b",
+    r"\bdoctorate\b",
+    r"\bdoctoral\b",
+    r"\bmasterabschluss\b",
+)
+
+# Softening / preference phrases — if any appear in the surrounding window
+# (±80 chars), the degree mention is treated as nice-to-have, not required.
+_MASTERS_SOFTENING = (
+    "preferred", "is a plus", "would be a plus", "is preferred",
+    "nice to have", "would be nice", "would be welcome",
+    "advantageous", "is an advantage", "is advantageous", "of advantage",
+    "desirable", "is desirable", "is welcome",
+    "von vorteil", "wäre von vorteil", "wünschenswert",
+)
+
+# Exclusion contexts — these contain the trigger phrase but aren't degree
+# requirements at all. If detected in the surrounding window, skip the match.
+_MASTERS_EXCLUSION_CONTEXTS = (
+    "scrum master", "master data", "master class", "masterclass",
+    "master branch", "master node", "master/slave", "master plan",
+    "master key", "headmaster", "grandmaster", "master of ceremonies",
+)
+
+
 def _no_masters_required(j: dict) -> bool:
-    """Drop jobs that strictly require a Master's degree with no Bachelor's alternative."""
+    """
+    DROP jobs that require a Master's, MSc, PhD, or Doctorate.
+
+    Trigger phrases (case-insensitive): "master's degree", "msc", "m.sc",
+    "phd", "ph.d", "doctorate", "doctoral", "Masterabschluss".
+
+    Each trigger occurrence is examined in a ±80-char window. We KEEP when:
+      - The window contains a softening phrase ("preferred", "is a plus",
+        "nice to have", "advantageous", "desirable", "von Vorteil", …)
+      - The window contains an exclusion phrase ("scrum master", "master
+        data", "masterclass", "master branch", …)
+
+    A Bachelor's requirement on its own is NOT a trigger here — we only
+    react to Master/PhD mentions.
+    """
     import re
-    desc_lower = (j.get("description") or "").lower()
+    title = (j.get("title") or "").lower()
+    desc  = (j.get("description") or "").lower()
+    text  = f"{title}\n{desc}"
 
-    # Signals that Bachelor's is also fine — if any of these is present
-    # alongside a Master's signal, we keep the job.
-    bachelors_ok = (
-        "bachelor", "b.sc", "bsc", "undergraduate",
-        "or equivalent", "or related degree", "ba/bs",
-    )
-    has_bachelor_alt = any(b in desc_lower for b in bachelors_ok)
+    for pat in _MASTERS_TRIGGER_PATTERNS:
+        for m in re.finditer(pat, text):
+            start = max(0, m.start() - 80)
+            end   = min(len(text), m.end() + 80)
+            window = text[start:end]
 
-    # Signals that Master's is strictly required (verbose form)
-    masters_required_verbose = (
-        "master's degree required", "master degree required",
-        "masters degree required", "msc required", "m.sc. required",
-        "must have a master", "requires a master",
-        "master's degree is required", "masterabschluss erforderlich",
-        "abgeschlossenes masterstudium",
-    )
-    for signal in masters_required_verbose:
-        if signal in desc_lower:
-            if not has_bachelor_alt:
-                return False
-
-    # NEW: catch concise "Master Degree in X" / "Master's Degree in X" /
-    # "Master of Science in X" / "MSc in X" — these are clear requirements
-    # even without the word "required" attached.
-    masters_concise = (
-        r"\bmaster(?:'s)?\s+degree\s+in\b",
-        r"\bmaster\s+of\s+science\s+in\b",
-        r"\bmsc\s+in\b",
-        r"\bm\.sc\.?\s+in\b",
-    )
-    for pat in masters_concise:
-        if re.search(pat, desc_lower):
-            if not has_bachelor_alt:
-                return False
-
-    # NEW: contextual — "Minimum Qualifications" / "Required Qualifications"
-    # header followed within ~300 chars by "master" with no bachelor alternative
-    # in the same window. This catches the Netlight-style listings.
-    context_patterns = (
-        r"(minimum|required|essential)\s+qualifications?[\s\S]{0,300}?\bmaster",
-        r"requirements?\s*:[\s\S]{0,300}?\bmaster\s+degree",
-    )
-    for pat in context_patterns:
-        m = re.search(pat, desc_lower)
-        if m:
-            window = m.group(0)
-            if not any(b in window for b in bachelors_ok):
-                return False
+            # Exclusion context? skip this occurrence.
+            if any(excl in window for excl in _MASTERS_EXCLUSION_CONTEXTS):
+                continue
+            # Softened? skip this occurrence.
+            if any(soft in window for soft in _MASTERS_SOFTENING):
+                continue
+            # Real Master/PhD requirement found → drop
+            return False
 
     return True
 
@@ -489,26 +535,30 @@ def main(dry_run: bool = False) -> None:
     new_jobs = [j for j in all_jobs if j["id"] not in seen]
     print(f"New (unseen) jobs: {len(new_jobs)}")
 
+    def _apply_filter(jobs: list[dict], fn, label: str) -> list[dict]:
+        """Run fn over jobs; print kept/dropped counts and 3 dropped example titles."""
+        kept, dropped = [], []
+        for j in jobs:
+            (kept if fn(j) else dropped).append(j)
+        if dropped:
+            print(f"[{label}] dropped {len(dropped)} jobs, e.g.:")
+            for ex in dropped[:3]:
+                print(f"  - {ex.get('title', '')[:90]} @ {ex.get('company', '')}")
+        else:
+            print(f"[{label}] dropped 0 jobs")
+        print(f"After {label}: {len(kept)}")
+        return kept
+
     # Germany on-site OR remote-that-includes-Germany only.
-    # Drops: Poland F2F, Spain F2F, Brazil/Colombia, US-only remote, etc.
-    new_jobs = [j for j in new_jobs if _is_attendable_from_germany(j)]
-    print(f"After location filter (Germany-attendable): {len(new_jobs)}")
-
+    new_jobs = _apply_filter(new_jobs, _is_attendable_from_germany, "Location filter (Germany-attendable)")
     # Drop jobs that are clearly German-language with no English mention
-    new_jobs = [j for j in new_jobs if _is_english_friendly(j)]
-    print(f"After English filter: {len(new_jobs)}")
-
-    # Drop jobs requiring 3+ years experience
-    new_jobs = [j for j in new_jobs if _no_experience_overload(j)]
-    print(f"After experience filter: {len(new_jobs)}")
-
+    new_jobs = _apply_filter(new_jobs, _is_english_friendly, "English filter")
+    # HARD filter: experience requirement of 2 or more years
+    new_jobs = _apply_filter(new_jobs, _no_experience_overload, "ExperienceFilter (>=2 years)")
     # Drop senior/lead roles
-    new_jobs = [j for j in new_jobs if _not_fulltime_senior(j)]
-    print(f"After senior filter: {len(new_jobs)}")
-
-    # Drop jobs that strictly require a Master's degree
-    new_jobs = [j for j in new_jobs if _no_masters_required(j)]
-    print(f"After Master's filter: {len(new_jobs)}")
+    new_jobs = _apply_filter(new_jobs, _not_fulltime_senior, "Senior-title filter")
+    # HARD filter: Master/MSc/PhD required (with softening + exclusion handling)
+    new_jobs = _apply_filter(new_jobs, _no_masters_required, "MastersFilter")
 
     if not new_jobs:
         print("Nothing new today. Exiting.")
@@ -533,23 +583,18 @@ def main(dry_run: bool = False) -> None:
         bar = "█" * min(count, 40)
         print(f"  {category:22s} {count:4d}  {bar}")
 
-    # ── Tiered bands ─────────────────────────────────────────────────────────
-    # MIN_SCORE = 45 is the absolute floor. Within it, group into 3 bands and
-    # cap each separately instead of a single global MAX_RESULTS truncation.
+    # ── Single ranked list — sorted by score desc, capped at MAX_RESULTS ─────
+    # Bands removed in the restored notifier; notifier sorts internally by
+    # score desc + fresh-first within score, so we only need to apply the
+    # floor and cap here.
     good = [j for j in scored if j["score"] >= MIN_SCORE]
     good.sort(key=lambda x: x["score"], reverse=True)
+    top = good[:MAX_RESULTS]
 
-    band_a = [j for j in good if j["score"] >= 70][:BAND_A_MAX]
-    band_b = [j for j in good if 55 <= j["score"] < 70][:BAND_B_MAX]
-    band_c = [j for j in good if 45 <= j["score"] < 55][:BAND_C_MAX]
-    top = band_a + band_b + band_c
+    print(f"\nJobs scoring >= {MIN_SCORE}: {len(good)}")
+    print(f"Sending top {len(top)} to notifications\n")
 
-    print(f"\nBand A (Apply now,   70–100): {len(band_a)} jobs")
-    print(f"Band B (Worth a look, 55–69): {len(band_b)} jobs")
-    print(f"Band C (Long shots,   45–54): {len(band_c)} jobs")
-    print(f"Total in digest: {len(top)}\n")
-
-    for j in top[:10]:  # print preview in CI logs
+    for j in top[:10]:  # preview in CI logs
         print(f"  [{j['score']:3d}] {j['title']} @ {j['company']} ({j['source']})")
 
     # ── Notify ────────────────────────────────────────────────────────────────

@@ -75,29 +75,59 @@ Certifications:
 """
 
 # ── Search queries sent to job boards ─────────────────────────────────────────
-# Curated list — every query targets a role Sherwan's CV qualifies him for.
-# Data Analyst queries removed: pull in too many off-target roles for an AI/ML CV.
+# Wide net — every query targets a role Sherwan's CV qualifies him for.
+# More variants = more recall; the post-scrape filters drop the off-targets.
+# JobSpy processes the first 15 of these (see scrape_jobspy in scrapers.py).
 SEARCH_QUERIES = [
-    "Junior AI Engineer Germany English",
-    "Junior ML Engineer Germany English",
-    "Junior Data Scientist Germany English",
-    "AI Engineer LLM Germany English",
-    "LLM Engineer Germany English",
-    "GenAI Engineer Germany English",
-    "AI Agent Engineer Germany English",
-    "Applied AI Engineer Germany English",
-    # Internships are OK — they're employment, not student-status-dependent
-    "AI Internship Germany English",
-    "ML Internship Germany English",
-    "Graduate Data Scientist Germany English",
-    "Graduate ML Engineer Germany English",
-    "Junior Data Scientist Berlin English",
-    "Junior ML Engineer Berlin English",
-    "AI Engineer Berlin English",
-    "Junior ML Engineer NRW English",
-    "AI Engineer Düsseldorf English",
-    "Remote AI Engineer Germany English",
-    "Remote LLM Engineer Europe English",
+    # Core junior AI/ML/data — English-first phrasings for the German market
+    "Junior AI Engineer Germany",
+    "Junior ML Engineer Germany",
+    "Junior Machine Learning Engineer Germany",
+    "Junior Data Scientist Germany",
+    "Entry Level AI Engineer Germany",
+    "Entry Level Data Scientist Germany",
+    "Graduate Data Scientist Germany",
+    "Graduate ML Engineer Germany",
+    "Graduate AI Engineer Germany",
+    "AI Engineer Germany English",
+    "Machine Learning Engineer Germany English",
+    "Data Scientist Germany English",
+    "Junior Python Developer Germany",
+    # LLM / GenAI / agent-systems (Sherwan's iseremo stack)
+    "LLM Engineer Germany",
+    "AI Engineer LLM Germany",
+    "GenAI Engineer Germany",
+    "Generative AI Engineer Germany",
+    "AI Agent Engineer Germany",
+    "Applied AI Engineer Germany",
+    "Applied Scientist Germany",
+    "AI Software Engineer Germany",
+    "Prompt Engineer Germany",
+    "RAG Engineer Germany",
+    # Internships (employment, not student-status-dependent)
+    "AI Internship Germany",
+    "ML Internship Germany",
+    "Machine Learning Internship Germany",
+    "Data Science Internship Germany",
+    "AI Intern Germany English",
+    # City / region anchors — surface jobs that filter by location
+    "Junior Data Scientist Berlin",
+    "Junior ML Engineer Berlin",
+    "AI Engineer Berlin",
+    "AI Engineer Munich",
+    "Data Scientist Munich",
+    "Junior AI Engineer Düsseldorf",
+    "AI Engineer Düsseldorf",
+    "AI Engineer NRW",
+    "Junior ML Engineer NRW",
+    "Data Scientist Hamburg",
+    "AI Engineer Frankfurt",
+    # Remote-EU phrasings
+    "Remote AI Engineer Germany",
+    "Remote LLM Engineer Europe",
+    "Remote Machine Learning Engineer EU",
+    "Remote Data Scientist Germany",
+    "Remote Junior AI Engineer Europe",
 ]
 
 LOCATION = "Germany"
