@@ -5,65 +5,73 @@
 # ── Your CV profile (used by Claude for scoring) ──────────────────────────────
 CV_PROFILE = """
 Name: Sherwan Ali
-Location: Bochum, Germany | Full work authorisation (valid residence permit)
-Availability: Currently interning at iseremo GmbH (Apr 2026–present). Open to internships now and full-time from July 2026.
-NOT eligible for Werkstudent — not enrolled at a German university.
-Target roles: Junior AI Engineer, Junior ML Engineer, Junior Data Scientist, LLM Engineer, Data Analyst, AI Internship
+Location: Bochum, Germany. Full work authorization (valid German residence permit).
+Availability: Currently interning at iseremo GmbH (Apr 2026 to present). Available full-time
+from August 2026.
+Not currently enrolled at a German university, so NOT eligible for Werkstudent roles for now.
+
+Target roles: Junior AI Engineer, Junior ML Engineer, Junior Data Scientist, LLM Engineer,
+AI/Software Engineer, Data Analyst, AI internship.
 
 LANGUAGE REQUIREMENT (critical for scoring):
-- English: C1 — STRONGLY prefer English-speaking roles or teams
-- German: B1 — can work in German-light environments but NOT suited for roles requiring fluent/advanced German
-- PENALISE roles requiring C1/C2 German or "verhandlungssicheres Deutsch"
-- Turkish: C1, Arabic: Native, Kurdish: Native
+- English: C1. STRONGLY prefer English-first roles or English-speaking teams.
+- German: B1. Can work in German-light environments but NOT suited for roles requiring fluent
+  or advanced German.
+- PENALISE roles requiring C1/C2 German or "verhandlungssicheres Deutsch".
+- Turkish: C1. Arabic: native. Kurdish: native.
+
+LOCATION AND WORK AUTHORIZATION (critical for scoring):
+- Authorized to work in Germany only. NOT authorized for the US, UK, or other non-EU countries.
+- PENALISE or REJECT roles that are US-only, US-remote-only, require US/UK or other non-EU work
+  authorization, or are onsite outside Germany with no Germany or EU-remote option.
+- Roles in Germany, or remote within Germany or the EU, are a fit.
 
 Education:
-- B.Sc. Computer Engineering, Üsküdar University, Istanbul (GPA 3.41/4.00, graduating June 2026)
-- Focus: AI, Machine Learning, Data Analytics
-- Coursework: Machine Learning, Deep Learning, Database Systems, Statistics, Data Mining, Linear Algebra, Computer Vision
-
-Technical Skills:
-- Programming: Python (advanced), SQL, JavaScript, Excel
-- AI & LLMs: LLMs, RAG, LangChain, Prompt Engineering, Agent Workflows, LLM Evaluation, Fine-tuning
-- ML: Classification, Regression, Neural Networks, CNNs, Transformers, Hyperparameter Tuning, Imbalanced Learning
-- Libraries & Frameworks: PyTorch, TensorFlow, Keras, scikit-learn, XGBoost, Pandas, NumPy, React, Node.js
-- Infrastructure & Tools: Git, GitHub Actions, Docker, REST APIs, Web Scraping, VS Code, Jupyter Notebooks
+- B.Sc. Computer Engineering, Üsküdar University, Istanbul (graduating July 2026). Programme
+  delivered in English.
+- Final grade 1.9 (German scale, converted; original GPA 3.41/4.00). Focus: AI, Machine
+  Learning, Data Analytics.
+- Coursework: Machine Learning, Deep Learning, Computer Vision, Database Systems, Statistics,
+  Data Mining.
+- Thesis: forensic audit and reproducibility study of CSRBoost (IEEE Access 2025).
 
 Work Experience:
-- Software & AI Intern, iseremo GmbH, Düsseldorf (Apr 2026 – Present):
-  Building LLM-powered chatbot and AI agent systems end-to-end; owns prompting strategies, tool integrations,
-  and agent workflows. Designs evaluation and testing frameworks for AI systems. Works full-stack: databases,
-  backend logic, web development.
-- IT Support & Website Management Intern, Salam Institute for Peace and Justice (Dec 2024 – Aug 2025, Remote):
-  Led WordPress migration, built vendor evaluation framework covering 15+ firms, translated business
-  requirements into technical specifications, trained non-technical staff.
+- Software and AI Intern, iseremo GmbH, Düsseldorf (Apr 2026 to present): building AI chatbots
+  and assistant systems with FastAPI, Docker, and the Anthropic and OpenAI APIs; databases and
+  data structures; testing, error analysis, documentation; broader software and web development.
+- IT Support and Web Management Intern, Salam Institute for Peace and Justice (Dec 2024 to Aug
+  2025, remote): co-led a WordPress migration and redesign for a multi-country nonprofit;
+  evaluated 15+ dev firms; translated business requirements to technical specs; trained
+  non-technical staff.
 
 Key Projects:
-- Forensic Audit of CSRBoost — Graduation Thesis (solo) (Python, scikit-learn, PyTorch, imbalanced-learn):
-  Reverse-engineered Yadav et al. (IEEE Access 2025) over 3 months, ~75,000 configurations, 900+ compute-hours.
-  Mathematically proved the published Table 2 cannot come from any single coherent ML pipeline. Documented
-  eight per-cell undocumented evaluation choices behind 143 of 143 reproduced metrics including test-set
-  leakage on GAN-family methods, mid-table F1-averaging substitution, sub-zero AP thresholds, AP polarity
-  inversion. github.com/SherwanAli0/csrboost-audit
-- FUS Recommender System Replication — 4-author team (Python, NumPy, scikit-learn, GitHub Actions):
-  Replicated D'Aniello et al. (IEEE Access 2026) on MovieLens 100k under 10-fold cross-validation. Owned FUS
-  and CF implementations end-to-end. Reproduced FUS > CF > GIM > PF ordering; MAE_users at k=50 matched
-  paper to four decimals (0.7025 vs 0.703). Co-designed 12-test CI suite on GitHub Actions.
-  github.com/SherwanAli0/Recommender-System-Paper-Replication
-- Daily AI-Powered Job Hunter — solo (Python, GitHub Actions, Anthropic API, Greenhouse/Lever APIs):
-  Built and shipped end-to-end automated job matching system. Scrapes Greenhouse, Lever, plus 15+ German
-  company career pages including Zalando, DeepL, SAP, Siemens, BMW, Bosch, Celonis. Claude scoring 0–100;
-  daily Notion + email digest at 7AM via GitHub Actions. ~50–100 jobs/day at under €0.10/day.
-  github.com/SherwanAli0/job-hunter
-- AI-Powered German Language Learning App — solo (React, Vite, Tailwind, Zustand, Node.js, Anthropic API):
-  Full-stack language learning app: React + Vite frontend, Node.js proxy backend, live LLM integration.
-  Prompt-engineering patterns for contextual exercises, adaptive feedback, dynamic difficulty.
-  github.com/SherwanAli0/German-App
+- Forensic Audit of CSRBoost (graduation thesis, solo): Python, scikit-learn, PyTorch,
+  imbalanced-learn. 15 datasets, 10 algorithms, ~75,000 configurations, 900+ compute-hours.
+  Reproduced 143 of 143 metrics and showed the published Table 2 cannot come from a single ML
+  pipeline.
+- FUS Recommender System Replication (4-author team): Python, NumPy, scikit-learn, GitHub
+  Actions. Replicated a 2026 IEEE Access paper on MovieLens 100k with 10-fold cross-validation.
+  Owned the FUS and collaborative-filtering implementations. 12-test CI suite.
+- Job Hunter (solo): Python, Anthropic API, Greenhouse/Lever/Notion/Gmail REST APIs, GitHub
+  Actions. Scores postings 0 to 100 against a profile and emails a daily digest.
+- AI Language-Learning App (solo): React, Vite, Tailwind, Node.js, Anthropic API. Full-stack
+  adaptive learning app with live LLM integration, prompt engineering, adaptive feedback.
+
+Technical Skills:
+- Programming: Python, SQL, JavaScript.
+- Machine Learning: scikit-learn, PyTorch, TensorFlow, Keras, XGBoost, imbalanced-learn;
+  classification, regression, CNNs, transformers, transfer learning, computer vision,
+  hyperparameter tuning, cross-validation.
+- LLM and GenAI: Anthropic API, OpenAI API, prompt engineering, RAG, agent workflows,
+  structured outputs.
+- Backend and Frontend: FastAPI, REST APIs, Node.js, React, Vite, Tailwind.
+- Data: Pandas, NumPy, Seaborn.
+- Infrastructure: Docker, Git, GitHub Actions (CI/CD), Linux, Jupyter, VS Code.
 
 Certifications:
-- IBM AI Engineering Professional Certificate (Sep 2025) — 13 courses: ML, Deep Learning, CV, Transformers,
-  LLM fine-tuning, RAG, LangChain
-- Google Advanced Data Analytics Professional Certificate (Mar 2026) — statistics, regression, ML, Tableau
-- Databases and SQL for Data Science with Python — IBM/Coursera (Apr 2026)
+- IBM AI Engineering Professional Certificate (Coursera, Sep 2025).
+- Google Advanced Data Analytics Professional Certificate (Coursera, Mar 2026).
+- Databases and SQL for Data Science with Python (Coursera/IBM, Apr 2026).
 """
 
 # ── Search queries sent to job boards ─────────────────────────────────────────

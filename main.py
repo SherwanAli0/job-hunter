@@ -52,13 +52,18 @@ _TITLE_NOISE_RE = re.compile(
     r"|\b(m/w/d|m/f/d|w/m/d|d/m/w|f/m/x|m/f/x|all\s+genders?)\b",
     re.IGNORECASE,
 )
-# Corporate suffixes that don't change the company identity for dedup.
-# We DO NOT strip "ai" because it's part of many AI startup brand names.
+# Corporate suffixes stripped from the END of company names. Per review,
+# this list includes "ai" / "labs" too — necessary for matching
+# "Mistral AI" against "mistral", "Stability AI" against "stability", etc.
+# Known tradeoff: "Open AI" → "open" while "OpenAI" → "openai" (one token,
+# no internal word boundary, so suffix regex can't fire). Rare in practice.
+# Applied REPEATEDLY so "X Labs Inc" → "X labs" → "X" → "x" all collapse.
 _COMPANY_SUFFIX_RE = re.compile(
-    r"\b(gmbh|ag|se|kg|ohg|inc\.?|ltd\.?|llc|corp\.?|corporation|group|"
-    r"holdings?|technologies|tech)\b\.?$",
+    r"\s+(ai|labs|inc|incorporated|gmbh|ag|se|kg|ohg|ltd|limited|llc|"
+    r"corp|corporation|group|holdings?|technologies|tech)\.?$",
     re.IGNORECASE,
 )
+_NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 _WS_RE = re.compile(r"\s+")
 
 
@@ -71,11 +76,24 @@ def _normalize(s: str) -> str:
 
 
 def _normalize_company(s: str) -> str:
-    """Like _normalize but also strips corporate suffixes (GmbH, Inc, …)."""
+    """
+    Aggressively normalize a company name for dedup keys:
+      1. lowercase, strip gender markers, collapse whitespace
+      2. repeatedly strip trailing tokens (ai, labs, inc, gmbh, ltd, …)
+      3. remove ALL non-alphanumeric characters
+    So both "Delivery Hero" and "Deliveryhero" collapse to "deliveryhero",
+    "Mistral AI" and "mistral" collapse to "mistral",
+    "Stability AI Labs Inc." collapses to "stability".
+    """
     s = _normalize(s)
-    # Strip trailing corporate suffix
-    s = _COMPANY_SUFFIX_RE.sub("", s).strip()
-    s = _WS_RE.sub(" ", s).strip()
+    # Strip trailing tokens repeatedly so "X Labs Inc" → "X labs" → "X"
+    for _ in range(5):  # cap to avoid infinite loop on pathological input
+        new = _COMPANY_SUFFIX_RE.sub("", s).strip()
+        if new == s:
+            break
+        s = new
+    # Remove all non-alphanumeric: spaces, punctuation, accents stripped to nothing
+    s = _NON_ALNUM_RE.sub("", s)
     return s
 
 

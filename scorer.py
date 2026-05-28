@@ -478,6 +478,15 @@ SCORING SCALE — be calibrated, not generous
 - 0-39: Wrong field, wrong stack, wrong seniority, or wrong language requirement.
 
 ═══════════════════════════════════════════════════════════════
+WORK AUTHORIZATION (highest priority, applied before any other cap)
+═══════════════════════════════════════════════════════════════
+The candidate is authorized to work in Germany only, not the US, UK, or
+other non-EU countries. Score 0 to 15 for any role that is US-only,
+US-remote-only, requires US/UK or other non-EU work authorization, or is
+onsite outside Germany with no Germany or EU-remote option. Roles in
+Germany or remote within Germany or the EU are eligible.
+
+═══════════════════════════════════════════════════════════════
 HARD CAPS — these set a MAXIMUM score the role can receive.
 Apply the LOWEST applicable cap. Boosts cannot exceed the cap.
 ═══════════════════════════════════════════════════════════════

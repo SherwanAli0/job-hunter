@@ -1601,6 +1601,77 @@ def scrape_recruitee() -> list[dict]:
     return results
 
 
+# ── 19. germantechjobs.de RSS ────────────────────────────────────────────────
+# Public, no auth: https://www.germantechjobs.de/rss
+# Big German tech-jobs aggregator. Each <item> title is formatted as
+# "{role} @ {company} [{salary range}]". We split on " @ " to lift the
+# company out of the title. Feed is ~8 MB; we cap items processed.
+
+_GERMANTECHJOBS_RSS = "https://www.germantechjobs.de/rss"
+
+
+def _parse_gtj_title(raw: str) -> tuple[str, str]:
+    """
+    Split 'Role Title @ Company GmbH [salary range]' into (title, company).
+    Falls back to (raw, '') if no ' @ ' separator.
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return "", ""
+    # Strip trailing [salary] bracket
+    bracket = raw.rfind("[")
+    if bracket > 0 and raw.endswith("]"):
+        raw = raw[:bracket].strip()
+    # Split on " @ "
+    if " @ " in raw:
+        title, _, company = raw.rpartition(" @ ")
+        return title.strip(), company.strip()
+    return raw, ""
+
+
+def scrape_germantechjobs() -> list[dict]:
+    """
+    Pull the germantechjobs.de RSS feed. Each <item> is a job posting with
+    title, link, pubDate, and HTML description. No auth, no rate limit.
+    """
+    results: list[dict] = []
+    try:
+        r = requests.get(_GERMANTECHJOBS_RSS, headers=HEADERS, timeout=20)
+        if r.status_code != 200:
+            print(f"  [GermanTechJobs] HTTP {r.status_code}, skipping")
+            return results
+        soup = BeautifulSoup(r.text, "xml")
+        items = soup.find_all("item")
+        # Cap at 300 items (most recent first) — keeps scrape time reasonable
+        for item in items[:300]:
+            raw_title = (item.find("title").text if item.find("title") else "").strip()
+            title, company = _parse_gtj_title(raw_title)
+            if not title:
+                continue
+            url = (item.find("link").text if item.find("link") else "").strip()
+            posted = (item.find("pubDate").text if item.find("pubDate") else "").strip()
+            desc_html = (item.find("description").text if item.find("description") else "")
+            # Fall back to <content:encoded> for richer body if present
+            encoded = item.find("encoded")
+            if encoded and len(encoded.text) > len(desc_html):
+                desc_html = encoded.text
+            desc = BeautifulSoup(desc_html or "", "html.parser").get_text(separator="\n").strip()
+            results.append(job(
+                title=title,
+                company=company or "GermanTechJobs",
+                location="Germany",   # feed is Germany-focused by definition
+                url=url,
+                source="GermanTechJobs",
+                description=desc,
+                posted_at=posted,
+            ))
+    except Exception as e:
+        print(f"  [GermanTechJobs] failed: {e}")
+        return results
+    print(f"  [GermanTechJobs] {len(results)} jobs from RSS")
+    return results
+
+
 # ── Main entry point ───────────────────────────────────────────────────────────
 
 def scrape_all() -> list[dict]:
@@ -1624,6 +1695,7 @@ def scrape_all() -> list[dict]:
         scrape_lever,              # Mistral, Qonto, MoonPay, Neon, TrustYou, Nuri
         scrape_ashby,              # Perplexity, Deepgram, Ramp, Supabase, Linear, etc.
         scrape_recruitee,          # Limehome and other EU startups
+        scrape_germantechjobs,     # germantechjobs.de RSS — German tech aggregator
         scrape_brave_search,       # Brave web search API
         scrape_web_search,         # DuckDuckGo web search
     ]:
