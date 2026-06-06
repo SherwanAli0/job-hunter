@@ -444,15 +444,31 @@ def scrape_lever() -> list[dict]:
 
 # ── 7. Arbeitsagentur (German Federal Employment Agency — official API) ────────
 
+# Balanced across the four tracks (AI · ML · Data Scientist · Data Analyst).
+# The Arbeitsagentur API is the official German employment agency, so German
+# and English terms both work.
 ARBEITSAGENTUR_QUERIES = [
-    "Data Science",
-    "Machine Learning",
-    "Data Analyst",
+    # AI
     "Artificial Intelligence",
-    "Junior Data Scientist",
+    "AI Engineer",
+    "LLM Engineer",
+    # ML
+    "Machine Learning",
+    "Machine Learning Engineer",
     "Junior ML Engineer",
+    # Data Science
+    "Data Science",
+    "Data Scientist",
+    "Junior Data Scientist",
+    # Data Analyst
+    "Data Analyst",
+    "Data Analytics",
+    "Business Intelligence Analyst",
+    # Internships — one per track
+    "AI Praktikum",
+    "Machine Learning Internship",
     "Data Science Internship",
-    "Praktikum Data Science",
+    "Data Analyst Praktikum",
 ]
 
 def scrape_arbeitsagentur() -> list[dict]:
@@ -710,44 +726,46 @@ _SKIP_DOMAINS = {
 }
 
 # Broad queries designed to surface jobs on company career pages
+# BALANCED across the four tracks (AI · ML · Data Scientist · Data Analyst).
+# Used by the Brave + DuckDuckGo web-search scrapers.
 _WEB_QUERIES = [
-    # Junior roles + English
-    '"junior data scientist" Germany "English"',
-    '"junior machine learning engineer" Germany "English"',
+    # ── Junior roles + English — one per track ───────────────────────────────
     '"junior AI engineer" Germany "English"',
+    '"junior machine learning engineer" Germany "English"',
+    '"junior data scientist" Germany "English"',
     '"junior data analyst" Germany "English"',
-    '"junior NLP engineer" Germany "English"',
-    # Entry level + English
-    '"entry level" "data science" Germany "English"',
+    # ── Entry level / graduate + English — one per track ─────────────────────
+    '"entry level" "AI engineer" Germany "English"',
     '"entry level" "machine learning" Germany "English"',
     '"graduate" "data scientist" Germany "English"',
-    '"associate data scientist" Germany "English"',
-    # Internships
-    '"data science internship" Germany "English"',
-    '"machine learning internship" Germany "English"',
-    '"AI internship" Germany "English"',
-    '"data analyst internship" Germany "English"',
-    '"praktikum" "data science" "English"',
-    # Specific skills + English
+    '"junior" "data analytics" Germany "English"',
+    # ── AI / LLM depth ───────────────────────────────────────────────────────
+    '"AI engineer" OR "LLM engineer" junior Germany "English"',
+    '"generative AI" OR "GenAI" junior Germany "English"',
+    '"AI agent" OR "agentic" engineer Germany "English"',
+    # ── ML depth ─────────────────────────────────────────────────────────────
     '"python" "machine learning" junior Germany "English"',
-    '"llm" OR "nlp" junior Germany "English"',
-    '"deep learning" junior Germany "English"',
-    # Remote / hybrid + English
-    '"remote" "junior data scientist" Germany "English"',
-    '"hybrid" "junior data scientist" Germany "English"',
-    '"remote" "machine learning engineer" Germany "English"',
-    '"fully remote" "data science" Germany "English"',
-    # Dedicated remote searches — any location, English-speaking
-    '"fully remote" "data scientist" "English"',
-    '"fully remote" "machine learning" "English"',
-    '"fully remote" "data analyst" "English"',
-    '"remote first" "data science" "English"',
-    '"remote" "junior ML" "English"',
-    '"remote" "data science" internship "English"',
-    '"work from anywhere" "data science" "English"',
-    '"work from home" "junior data scientist" "English"',
+    '"deep learning" OR "computer vision" junior Germany "English"',
+    '"NLP engineer" OR "MLOps" junior Germany "English"',
+    # ── Data Science depth ───────────────────────────────────────────────────
+    '"associate data scientist" Germany "English"',
+    '"data scientist" "python" junior Germany "English"',
+    '"product data scientist" Germany "English"',
+    # ── Data Analyst depth ───────────────────────────────────────────────────
+    '"business intelligence analyst" Germany "English"',
+    '"BI analyst" OR "analytics engineer" Germany "English"',
+    '"data analyst" "SQL" junior Germany "English"',
+    '"business analyst" data Germany "English"',
+    # ── Internships — one per track ──────────────────────────────────────────
+    '"AI internship" Germany "English"',
+    '"machine learning internship" Germany "English"',
+    '"data science internship" Germany "English"',
+    '"data analyst internship" Germany "English"',
+    # ── Remote / EU — one per track ──────────────────────────────────────────
     '"remote" "AI engineer" junior "English"',
-    '"remote" "NLP" junior "English"',
+    '"fully remote" "machine learning" "English"',
+    '"fully remote" "data scientist" "English"',
+    '"fully remote" "data analyst" "English"',
 ]
 
 

@@ -75,59 +75,87 @@ Certifications:
 """
 
 # ── Search queries sent to job boards ─────────────────────────────────────────
-# Wide net — every query targets a role Sherwan's CV qualifies him for.
+# BALANCED across four equal tracks: AI · ML · Data Scientist · Data Analyst.
+# JobSpy processes only the FIRST 15 (see scrape_jobspy), so the first 16 are
+# interleaved 4×4 (AI, ML, DS, DA, repeat) — any prefix stays balanced.
 # More variants = more recall; the post-scrape filters drop the off-targets.
-# JobSpy processes the first 15 of these (see scrape_jobspy in scrapers.py).
 SEARCH_QUERIES = [
-    # Core junior AI/ML/data — English-first phrasings for the German market
+    # ── TOP 16: interleaved AI / ML / Data Scientist / Data Analyst ──────────
+    # Junior tier
     "Junior AI Engineer Germany",
-    "Junior ML Engineer Germany",
     "Junior Machine Learning Engineer Germany",
     "Junior Data Scientist Germany",
+    "Junior Data Analyst Germany",
+    # Entry-level tier
     "Entry Level AI Engineer Germany",
+    "Entry Level Machine Learning Engineer Germany",
     "Entry Level Data Scientist Germany",
-    "Graduate Data Scientist Germany",
-    "Graduate ML Engineer Germany",
+    "Entry Level Data Analyst Germany",
+    # Graduate tier
     "Graduate AI Engineer Germany",
+    "Graduate ML Engineer Germany",
+    "Graduate Data Scientist Germany",
+    "Graduate Data Analyst Germany",
+    # No-seniority tier (English-confirmed)
     "AI Engineer Germany English",
     "Machine Learning Engineer Germany English",
     "Data Scientist Germany English",
-    "Junior Python Developer Germany",
-    # LLM / GenAI / agent-systems (Sherwan's iseremo stack)
+    "Data Analyst Germany English",
+
+    # ── AI / LLM / GenAI depth (Sherwan's iseremo stack) ─────────────────────
     "LLM Engineer Germany",
-    "AI Engineer LLM Germany",
     "GenAI Engineer Germany",
     "Generative AI Engineer Germany",
     "AI Agent Engineer Germany",
     "Applied AI Engineer Germany",
-    "Applied Scientist Germany",
     "AI Software Engineer Germany",
-    "Prompt Engineer Germany",
-    "RAG Engineer Germany",
-    # Internships (employment, not student-status-dependent)
+
+    # ── ML / Machine Learning depth ──────────────────────────────────────────
+    "MLOps Engineer Germany",
+    "Computer Vision Engineer Germany",
+    "NLP Engineer Germany",
+    "Deep Learning Engineer Germany",
+    "Applied Scientist Germany",
+    "Machine Learning Researcher Germany",
+
+    # ── Data Science depth ───────────────────────────────────────────────────
+    "Associate Data Scientist Germany",
+    "Data Science Analyst Germany",
+    "Product Data Scientist Germany",
+    "Quantitative Analyst Germany English",
+
+    # ── Data Analyst / Analytics depth ───────────────────────────────────────
+    "Business Intelligence Analyst Germany English",
+    "BI Analyst Germany English",
+    "Data Analytics Germany English",
+    "Junior Business Analyst Germany English",
+    "Analytics Engineer Germany",
+    "Reporting Analyst Germany English",
+
+    # ── Internships — one per track ──────────────────────────────────────────
     "AI Internship Germany",
-    "ML Internship Germany",
     "Machine Learning Internship Germany",
     "Data Science Internship Germany",
-    "AI Intern Germany English",
-    # City / region anchors — surface jobs that filter by location
-    "Junior Data Scientist Berlin",
-    "Junior ML Engineer Berlin",
-    "AI Engineer Berlin",
-    "AI Engineer Munich",
-    "Data Scientist Munich",
-    "Junior AI Engineer Düsseldorf",
-    "AI Engineer Düsseldorf",
-    "AI Engineer NRW",
-    "Junior ML Engineer NRW",
-    "Data Scientist Hamburg",
-    "AI Engineer Frankfurt",
-    # Remote-EU phrasings
+    "Data Analyst Internship Germany",
+
+    # ── City / region anchors — balanced across tracks ───────────────────────
+    "AI Engineer Berlin English",
+    "Machine Learning Engineer Berlin English",
+    "Data Scientist Berlin English",
+    "Data Analyst Berlin English",
+    "Data Scientist Munich English",
+    "Data Analyst Munich English",
+    "AI Engineer NRW English",
+    "Data Analyst NRW English",
+    "Data Scientist Düsseldorf English",
+    "Data Analyst Hamburg English",
+    "AI Engineer Frankfurt English",
+
+    # ── Remote-EU phrasings — one per track ──────────────────────────────────
     "Remote AI Engineer Germany",
-    "Remote LLM Engineer Europe",
     "Remote Machine Learning Engineer EU",
     "Remote Data Scientist Germany",
-    "Remote Junior AI Engineer Europe",
+    "Remote Data Analyst Germany English",
 ]
 
 LOCATION = "Germany"

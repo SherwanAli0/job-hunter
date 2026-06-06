@@ -507,37 +507,47 @@ CAP AT 35 if ANY of these are true:
 
 CAP AT 50 if ANY of these are true:
 - Role requires 2 years professional experience.
-- Role is data analyst with no ML/AI component (Sherwan's CV is AI/ML, not analyst).
 - Role is general DevOps / platform engineering / Kubernetes primary focus.
-- Role is general full-stack web dev with no AI component.
+- Role is general full-stack web dev with no data/AI component.
 
 ═══════════════════════════════════════════════════════════════
-TARGET ROLE LADDER — score generously when these match
+TARGET ROLE LADDER — four EQUAL tracks: AI · ML · Data Science · Data Analyst
+Score generously when these match. The candidate is equally interested in
+AI engineering, machine learning, data science, AND data analytics — do NOT
+favour AI roles over data-analyst or data-science roles. All four tracks below
+start at the SAME score.
 ═══════════════════════════════════════════════════════════════
 
-TIER 1 (start at 80, then apply caps and adjustments):
-- AI Engineer / LLM Engineer / GenAI Engineer (junior, intern, graduate, or no seniority specified)
-- Applied AI Engineer / Applied AI Scientist (junior level)
-- AI Agent Engineer / Agentic AI Engineer
-- Conversational AI / RAG Engineer
-- Forward Deployed Engineer (AI focus)
-- AI Software Engineer at AI-first startups
+TIER 1 (start at 80, then apply caps and adjustments) — ANY of the 4 tracks:
+  AI track:
+    - AI Engineer / LLM Engineer / GenAI Engineer / AI Software Engineer
+    - Applied AI Engineer / Applied AI Scientist
+    - AI Agent Engineer / Agentic AI / Conversational AI / RAG Engineer
+  ML track:
+    - Machine Learning Engineer / Junior ML Engineer
+    - MLOps Engineer / Computer Vision Engineer / NLP Engineer
+    - Deep Learning Engineer / Applied Scientist / ML Researcher
+  Data Science track:
+    - Data Scientist / Junior Data Scientist / Associate Data Scientist
+    - Product Data Scientist / Quantitative Analyst
+  Data Analyst track:
+    - Data Analyst / Junior Data Analyst / Business Intelligence (BI) Analyst
+    - Analytics Engineer / Data Analytics / Reporting Analyst
+    - Business Analyst with a clear data/SQL/Python focus
+  (junior, entry-level, graduate, or no seniority specified all qualify)
 
 TIER 2 (start at 70, then apply caps and adjustments):
-- Junior Machine Learning Engineer
-- Junior Data Scientist
-- Associate Data Scientist
-- ML Engineer (no seniority specified)
-- Data Scientist (no seniority specified, with LLM/AI mentioned)
+- Any of the four tracks above at mid level (some experience expected but
+  still under the 2-year hard cap), or with a partial skills overlap.
 
 TIER 3 (start at 60, then apply caps and adjustments):
-- AI Internship / ML Internship / Data Science Internship (paid)
-- Graduate Programme in AI / ML / Data Science
-- Junior Data Analyst with ML/AI angle
-- AI/ML Praktikum (paid)
+- AI / ML / Data Science / Data Analyst internships (paid)
+- Graduate programmes in any of the four tracks
+- Praktikum (paid) in any of the four tracks
 
 OFF-TARGET (start at 40, max possible 50 even with boosts):
-- Anything else that mentions Python or AI but isn't core AI/ML work
+- Anything that isn't AI, ML, data science, or data analytics work
+  (e.g. pure frontend, pure DevOps, sales, marketing, non-technical).
 
 ═══════════════════════════════════════════════════════════════
 BOOSTS — additive, but never exceed the applicable cap
