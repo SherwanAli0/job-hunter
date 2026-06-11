@@ -37,8 +37,9 @@ Education:
 
 Work Experience:
 - Software and AI Intern, iseremo GmbH, Düsseldorf (Apr 2026 to present): building AI chatbots
-  and assistant systems with FastAPI, Docker, and the Anthropic and OpenAI APIs; databases and
-  data structures; testing, error analysis, documentation; broader software and web development.
+  and digital-assistant systems with FastAPI, Docker, and the Anthropic and OpenAI APIs;
+  working in a React and TypeScript front-end codebase (components, bug fixes, live testing);
+  databases and data structures; testing, error analysis, documentation.
 - IT Support and Web Management Intern, Salam Institute for Peace and Justice (Dec 2024 to Aug
   2025, remote): co-led a WordPress migration and redesign for a multi-country nonprofit;
   evaluated 15+ dev firms; translated business requirements to technical specs; trained
@@ -49,23 +50,28 @@ Key Projects:
   imbalanced-learn. 15 datasets, 10 algorithms, ~75,000 configurations, 900+ compute-hours.
   Reproduced 143 of 143 metrics and showed the published Table 2 cannot come from a single ML
   pipeline.
+- HalluScope, LLM Hallucination Detection (5-author team): Python, PyTorch, Hugging Face
+  Transformers, spaCy, scikit-learn. Replicated an IEEE BigComp 2025 method for entropy-based
+  hallucination scoring in LLMs. Owned the generation stage: ran LLaMA-3, Qwen2, and Gemma-2,
+  extracted token logits, computed per-sentence Shannon entropy. Reproduced the paper's central
+  claim across all 9 model-dataset cells. 12-test CI suite.
 - FUS Recommender System Replication (4-author team): Python, NumPy, scikit-learn, GitHub
   Actions. Replicated a 2026 IEEE Access paper on MovieLens 100k with 10-fold cross-validation.
   Owned the FUS and collaborative-filtering implementations. 12-test CI suite.
 - Job Hunter (solo): Python, Anthropic API, Greenhouse/Lever/Notion/Gmail REST APIs, GitHub
-  Actions. Scores postings 0 to 100 against a profile and emails a daily digest.
-- AI Language-Learning App (solo): React, Vite, Tailwind, Node.js, Anthropic API. Full-stack
-  adaptive learning app with live LLM integration, prompt engineering, adaptive feedback.
+  Actions CI/CD. Agentic tool scoring postings 0 to 100 with Claude structured outputs against
+  a profile; daily ranked email digest. Cost-controlled at EUR 0.02 per run.
 
 Technical Skills:
-- Programming: Python, SQL, JavaScript.
+- Programming: Python, SQL, JavaScript, TypeScript.
 - Machine Learning: scikit-learn, PyTorch, TensorFlow, Keras, XGBoost, imbalanced-learn;
   classification, regression, CNNs, transformers, transfer learning, computer vision,
   hyperparameter tuning, cross-validation.
-- LLM and GenAI: Anthropic API, OpenAI API, prompt engineering, RAG, agent workflows,
-  structured outputs.
+- LLM and GenAI: Anthropic API, OpenAI API, Hugging Face Transformers, open-source LLMs
+  (LLaMA, Qwen, Gemma), prompt engineering, RAG, agent workflows, structured outputs,
+  LLM evaluation, hallucination detection.
 - Backend and Frontend: FastAPI, REST APIs, Node.js, React, Vite, Tailwind.
-- Data: Pandas, NumPy, Seaborn.
+- Data: Pandas, NumPy, Seaborn, spaCy.
 - Infrastructure: Docker, Git, GitHub Actions (CI/CD), Linux, Jupyter, VS Code.
 
 Certifications:
@@ -76,9 +82,10 @@ Certifications:
 
 # ── Search queries sent to job boards ─────────────────────────────────────────
 # BALANCED across four equal tracks: AI · ML · Data Scientist · Data Analyst.
-# JobSpy processes only the FIRST 15 (see scrape_jobspy), so the first 16 are
-# interleaved 4×4 (AI, ML, DS, DA, repeat) — any prefix stays balanced.
-# More variants = more recall; the post-scrape filters drop the off-targets.
+# JobSpy ROTATES halves per run (morning run = first half, afternoon run =
+# second half — see _jobspy_active_queries), so every query gets coverage
+# every day. The first 16 are interleaved 4×4 (AI, ML, DS, DA, repeat) so any
+# prefix stays balanced. Post-scrape filters drop the off-targets.
 SEARCH_QUERIES = [
     # ── TOP 16: interleaved AI / ML / Data Scientist / Data Analyst ──────────
     # Junior tier

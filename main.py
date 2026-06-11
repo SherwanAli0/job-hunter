@@ -272,79 +272,85 @@ def _is_attendable_from_germany(j: dict) -> bool:
     return True
 
 
+# Softening phrases — if one appears near a years-of-experience mention, the
+# requirement is a wish, not a wall. German ads inflate requirements; a
+# softened "2-3 years" routinely interviews fresh grads with internships.
+_EXP_SOFTENERS = (
+    "ideally", "idealerweise", "preferabl", "preferred",
+    "wünschenswert", "wuenschenswert", "von vorteil", "a plus",
+    "nice to have", "or equivalent", "oder vergleichbar",
+    "desirable", "bonus", "would be great", "would be a plus",
+)
+
+
 def _no_experience_overload(j: dict) -> bool:
     """
-    DROP jobs requiring a minimum experience of 2 or more years.
+    Tiered experience filter (recall-friendly):
+      - 4+ years          → DROP always (clearly senior-targeted)
+      - 3 years           → DROP unless softened nearby (ideally/preferred/…)
+      - 2 years           → DROP only when HARD-required ("minimum", "at least",
+                            "must", a "+" sign, "mindestens") AND not softened
+      - under 2 / vague   → KEEP ("1-2 years", "0-2 years", "up to 2 years",
+                            bare "2 years experience" without a hard word)
 
-    Matches (the value extracted is the LOWER bound, then compared to 2):
-      - "N+ years", "N years experience", "minimum N years", "at least N years"
-      - "N-M years" / "N to M years"          (range — only N matters)
-      - German: "N+ Jahre", "N Jahre Berufserfahrung", "mindestens N Jahre"
-      - Written-out: "two/three/.../ten years experience"
-
-    KEEPS when:
-      - Lower bound < 2: "1-2 years", "0-2 years", "1+ year", "up to 2 years"
-      - The number isn't experience (calendar year, team size, salary, version)
-        — guarded by requiring "year(s)" / "Jahre" / "Berufserfahrung" adjacency
-        and the number on the LEFT side of a range, not the right.
+    Guards: calendar years (2024), team sizes ("team of 25"), "24/7", salary
+    figures never match — the number must sit next to year(s)/Jahre in an
+    experience context, and range right-hand sides don't count.
     """
     import re
     desc = (j.get("description") or "").lower()
 
-    written = {"one":1, "two":2, "three":3, "four":4, "five":5,
-               "six":6, "seven":7, "eight":8, "nine":9, "ten":10}
+    written = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+               "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
 
-    # 1. "N+ years" — the + sign is always a minimum
-    for m in re.finditer(r"(?<![-\d])(\d+)\+\s*years?\b", desc):
-        if int(m.group(1)) >= 2:
-            return False
-    # 2. "N-M years" / "N–M years" / "N to M years" — N is the minimum
-    for m in re.finditer(r"(?<![-\d])(\d+)\s*(?:[-–]|to)\s*\d+\s*years?\b", desc):
-        if int(m.group(1)) >= 2:
-            return False
-    # 3. "minimum N years" / "at least N years"
-    for m in re.finditer(r"\b(?:minimum|at\s+least)\s+(?:of\s+)?(\d+)\+?\s*years?\b", desc):
-        if int(m.group(1)) >= 2:
-            return False
-    # 4. "N years (of) experience" — bare; require explicit "experience" word and
-    #    block matches that are the right-hand side of a range or after "up to".
-    bare_pat = re.compile(
-        r"(?<![-\d])(?<!up to )(?<!up\sto)(?<!maximum )(?<!max )"
-        r"(\d+)\s*years?\s+(?:of\s+)?(?:[\w-]+\s+){0,3}experience\b"
-    )
-    for m in bare_pat.finditer(desc):
-        if int(m.group(1)) >= 2:
-            return False
-    # 5. "experience: N years" / "experience: N+ years"
-    for m in re.finditer(r"\bexperience\s*:?\s*(\d+)\+?\s*years?\b", desc):
-        if int(m.group(1)) >= 2:
-            return False
-    # 6. German — "N+ Jahre" / "N Jahre Berufserfahrung" / "mindestens N Jahre"
-    for m in re.finditer(r"(?<![-\d])(\d+)\+\s*jahre\b", desc):
-        if int(m.group(1)) >= 2:
-            return False
-    for m in re.finditer(r"(?<![-\d])(\d+)\s*jahre\s+berufserfahrung", desc):
-        if int(m.group(1)) >= 2:
-            return False
-    for m in re.finditer(r"\bmindestens\s+(\d+)\+?\s*jahre\b", desc):
-        if int(m.group(1)) >= 2:
-            return False
-    # 7. Written-out English forms
-    for m in re.finditer(
-        r"\b(one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:\(\d+\)\s+)?"
-        r"years?\s+(?:of\s+)?(?:[\w-]+\s+){0,3}experience\b",
-        desc,
-    ):
-        if written[m.group(1)] >= 2:
-            return False
-    for m in re.finditer(
-        r"\b(?:minimum|at\s+least)\s+(?:of\s+)?"
-        r"(one|two|three|four|five|six|seven|eight|nine|ten)\s+"
-        r"(?:\(\d+\)\s+)?years?\b",
-        desc,
-    ):
-        if written[m.group(1)] >= 2:
-            return False
+    def _softened(start: int, end: int) -> bool:
+        window = desc[max(0, start - 70):end + 70]
+        return any(s in window for s in _EXP_SOFTENERS)
+
+    def _violates(n: int, start: int, end: int, hard: bool) -> bool:
+        """Apply the tier rules to one matched mention. True = job must drop."""
+        if n >= 4:
+            return True
+        if n == 3:
+            return not _softened(start, end)
+        if n == 2:
+            return hard and not _softened(start, end)
+        return False
+
+    # (pattern, hard_requirement, value_extractor) — value from group(1)
+    checks = [
+        # "N+ years" — the + sign is itself a hard minimum
+        (r"(?<![-\d])(\d+)\+\s*years?\b", True, int),
+        # "N-M years" / "N to M years" — range; lower bound, treated as soft
+        # unless a hard word appears nearby (handled via the hard patterns too)
+        (r"(?<![-\d])(\d+)\s*(?:[-–]|to)\s*\d+\s*years?\b", False, int),
+        # "minimum N years" / "at least N years" — hard by definition
+        (r"\b(?:minimum|at\s+least)\s+(?:of\s+)?(\d+)\+?\s*years?\b", True, int),
+        # bare "N years (of) experience" — soft unless preceded by hard words
+        (r"(?<![-\d])(?<!up to )(?<!maximum )(?<!max )"
+         r"(\d+)\s*years?\s+(?:of\s+)?(?:[\w-]+\s+){0,3}experience\b", False, int),
+        # "experience: N years" in a requirements table — hard
+        (r"\bexperience\s*:?\s*(\d+)\+?\s*years?\b", True, int),
+        # German: "N+ Jahre" hard; "N Jahre Berufserfahrung" bare soft;
+        # "mindestens N Jahre" hard
+        (r"(?<![-\d])(\d+)\+\s*jahre\b", True, int),
+        (r"(?<![-\d])(\d+)\s*jahre\s+berufserfahrung", False, int),
+        (r"\bmindestens\s+(\d+)\+?\s*jahre\b", True, int),
+        # Written-out English: bare soft, minimum/at-least hard
+        (r"\b(one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:\(\d+\)\s+)?"
+         r"years?\s+(?:of\s+)?(?:[\w-]+\s+){0,3}experience\b",
+         False, lambda w: written[w]),
+        (r"\b(?:minimum|at\s+least)\s+(?:of\s+)?"
+         r"(one|two|three|four|five|six|seven|eight|nine|ten)\s+"
+         r"(?:\(\d+\)\s+)?years?\b",
+         True, lambda w: written[w]),
+    ]
+
+    for pattern, hard, to_int in checks:
+        for m in re.finditer(pattern, desc):
+            n = to_int(m.group(1))
+            if _violates(n, m.start(), m.end(), hard):
+                return False
 
     return True
 

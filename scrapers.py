@@ -92,44 +92,93 @@ def job(title, company, location, url, source, description="", posted_at=""):
     }
 
 
-# ── 1. JobSpy (LinkedIn + Indeed + Glassdoor) ──────────────────────────────────
+# ── 1. JobSpy (LinkedIn + Indeed + Google Jobs) ───────────────────────────────
+
+def _jobspy_active_queries() -> list[str]:
+    """
+    Rotate query halves across the two daily runs so ALL queries get coverage
+    every day without doubling per-run rate-limit exposure:
+      morning run  (5 UTC)  → first half of SEARCH_QUERIES
+      afternoon run (13 UTC) → second half
+    Manual runs pick the half matching the current UTC hour.
+    """
+    from datetime import datetime, timezone
+    n = len(SEARCH_QUERIES)
+    mid = (n + 1) // 2
+    if datetime.now(timezone.utc).hour < 12:
+        active = SEARCH_QUERIES[:mid]
+        label = f"A (1-{mid})"
+    else:
+        active = SEARCH_QUERIES[mid:]
+        label = f"B ({mid + 1}-{n})"
+    print(f"  [JobSpy] query slice {label} of {n} total")
+    return active
+
+
+def _jobspy_rows_to_jobs(df, results: list[dict]) -> None:
+    """Convert a JobSpy dataframe into job() dicts, appending to results."""
+    for _, row in df.iterrows():
+        url = str(row.get("job_url", "")) or str(row.get("url", ""))
+        if not url:
+            continue
+        posted = row.get("date_posted", "") or ""
+        results.append(job(
+            title=str(row.get("title", "")),
+            company=str(row.get("company", "")),
+            location=str(row.get("location", "")),
+            url=url,
+            source=str(row.get("site", "jobspy")),
+            description=str(row.get("description", "")),
+            posted_at=str(posted) if posted else "",
+        ))
+
 
 def scrape_jobspy() -> list[dict]:
     try:
         from jobspy import scrape_jobs  # type: ignore
 
-        results = []
-        # Widen recall: 15 queries (was 8) × 40 results (was 25) per site,
-        # with the 72h window kept so one failed daily run doesn't lose
-        # a day of postings; seen_jobs dedup handles the overlap.
-        for query in SEARCH_QUERIES[:15]:
+        results: list[dict] = []
+        active = _jobspy_active_queries()
+
+        # LinkedIn + Indeed — the reliable pair (glassdoor = Cloudflare blocked)
+        for query in active:
             try:
                 df = scrape_jobs(
-                    site_name=["linkedin", "indeed"],  # glassdoor = Cloudflare blocked
+                    site_name=["linkedin", "indeed"],
                     search_term=query,
                     location=LOCATION,
                     results_wanted=40,
                     hours_old=72,
                     country_indeed="Germany",
                 )
-                for _, row in df.iterrows():
-                    url = str(row.get("job_url", "")) or str(row.get("url", ""))
-                    if not url:
-                        continue
-                    posted = row.get("date_posted", "") or ""
-                    results.append(job(
-                        title=str(row.get("title", "")),
-                        company=str(row.get("company", "")),
-                        location=str(row.get("location", "")),
-                        url=url,
-                        source=str(row.get("site", "jobspy")),
-                        description=str(row.get("description", "")),
-                        posted_at=str(posted) if posted else "",
-                    ))
+                _jobspy_rows_to_jobs(df, results)
                 time.sleep(3)
             except Exception:
                 continue
-        print(f"  [JobSpy] {len(results)} jobs")
+
+        li_in_count = len(results)
+        print(f"  [JobSpy] {li_in_count} jobs from LinkedIn+Indeed")
+
+        # Google Jobs — aggregates StepStone, XING, and corporate boards we
+        # can't scrape directly. Newer jobspy versions need google_search_term;
+        # per-query try/except so an unsupported version or block never aborts.
+        for query in active[:10]:
+            try:
+                df = scrape_jobs(
+                    site_name=["google"],
+                    search_term=query,
+                    google_search_term=f"{query} jobs in Germany since last 3 days",
+                    location=LOCATION,
+                    results_wanted=25,
+                    hours_old=72,
+                )
+                _jobspy_rows_to_jobs(df, results)
+                time.sleep(3)
+            except Exception:
+                continue
+
+        print(f"  [JobSpy] {len(results) - li_in_count} jobs from Google Jobs")
+        print(f"  [JobSpy] {len(results)} jobs total")
         return results
     except Exception as e:
         print(f"  [JobSpy] failed: {e}")

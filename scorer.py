@@ -19,6 +19,16 @@ client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
 BATCH_SIZE = 10
 
+# Two-stage scoring (budget mode):
+#   Stage 2 — Haiku scores everything that survives the pre-screen (cheap bulk)
+#   Stage 3 — Sonnet re-scores only the finalists Haiku rates >= the floor,
+#             replacing their scores/reasons with sharper judgments.
+# Sonnet costs ~30x Haiku per token, but only ~10-25 finalists/run reach it,
+# so the add-on is roughly €0.05-0.10 per run.
+HAIKU_MODEL = "claude-haiku-4-5-20251001"
+SONNET_MODEL = "claude-sonnet-4-6"
+SONNET_RESCORE_FLOOR = 50
+
 # ── Hard disqualifiers — checked BEFORE any Claude API call ───────────────────
 # These patterns catch clear mismatches and set score=0 without spending tokens.
 
@@ -616,13 +626,13 @@ def _format_job_block(jobs: list[dict]) -> str:
     return "\n\n".join(lines)
 
 
-def _score_batch(batch: list[dict]) -> list[dict]:
+def _score_batch(batch: list[dict], model: str = HAIKU_MODEL) -> list[dict]:
     jobs_block = _format_job_block(batch)
     prompt = USER_TEMPLATE.format(n=len(batch), jobs_block=jobs_block)
 
     try:
         response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=model,
             max_tokens=1500,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
@@ -669,14 +679,27 @@ def score_jobs(jobs: list[dict]) -> list[dict]:
 
     print(f"  Pre-screened out: {prescreened_out} | Sending to Claude: {len(to_score)}")
 
-    # ── Stage 2: Claude scoring for remaining jobs ─────────────────────────────
+    # ── Stage 2: Haiku scoring for remaining jobs (cheap bulk pass) ────────────
     scored = []
     for i in range(0, len(to_score), BATCH_SIZE):
         batch = to_score[i : i + BATCH_SIZE]
-        result = _score_batch(batch)
+        result = _score_batch(batch, model=HAIKU_MODEL)
         scored.extend(result)
         time.sleep(1)
         print(f"  Scored {min(i + BATCH_SIZE, len(to_score))}/{len(to_score)}")
+
+    # ── Stage 3: Sonnet re-score of finalists (budget mode) ───────────────────
+    # Only jobs Haiku rates >= SONNET_RESCORE_FLOOR get the expensive second
+    # opinion. _score_batch overwrites score/reason in place on success and
+    # leaves the Haiku values untouched on any failure, so this stage can
+    # never lose a job — worst case it just keeps the Haiku ranking.
+    finalists = [jb for jb in scored if jb.get("score", 0) >= SONNET_RESCORE_FLOOR]
+    if finalists:
+        print(f"  [Sonnet] re-scoring {len(finalists)} finalists (Haiku >= {SONNET_RESCORE_FLOOR})")
+        for i in range(0, len(finalists), BATCH_SIZE):
+            _score_batch(finalists[i : i + BATCH_SIZE], model=SONNET_MODEL)
+            time.sleep(1)
+        print(f"  [Sonnet] done")
 
     # Merge Claude-scored jobs with pre-screened (score=0) jobs
     scored_ids = {j["id"] for j in scored}
